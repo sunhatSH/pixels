@@ -16,7 +16,7 @@ set(BOOST_LIBRARIES "program_options,regex")
 set(BOOST_BOOTSTRAP_COMMAND ./bootstrap.sh --with-libraries=${BOOST_LIBRARIES})
 set(BOOST_BUILD_TOOL ./b2)
 set(BOOST_CXXFLAGS "cxxflags=-std=c++11")
-set(BOOST_GIT_REPOSITORY git@github.com:boostorg/boost.git)
+set(BOOST_GIT_REPOSITORY https://github.com/boostorg/boost.git)
 set(BOOST_GIT_TAG boost-1.74.0)
 set(BOOST_GIT_SUBMODULES
         libs/headers libs/regex libs/program_options libs/algorithm

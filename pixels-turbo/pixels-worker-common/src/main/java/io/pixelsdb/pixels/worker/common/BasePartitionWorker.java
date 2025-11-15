@@ -37,6 +37,7 @@ import io.pixelsdb.pixels.planner.plan.physical.input.PartitionInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.PartitionOutput;
 import org.apache.logging.log4j.Logger;
 
+import java.io.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
@@ -56,6 +57,9 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+
+    // Fine-grained timers for four stages
+    private final WorkerMetrics.StageTimers partitionTimers = new WorkerMetrics.StageTimers();
 
     public BasePartitionWorker(WorkerContext context)
     {
@@ -142,6 +146,7 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 throw new WorkerException("error occurred threads, please check the stacktrace before this log record");
             }
 
+            partitionTimers.getWriteFileTimer().start();
             WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
             if (writerSchema.get() == null)
             {
@@ -162,7 +167,9 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 {
                     for (VectorizedRowBatch batch : batches)
                     {
+                        partitionTimers.getWriteCacheTimer().start();
                         pixelsWriter.addRowBatch(batch, hash);
+                        partitionTimers.getWriteCacheTimer().stop();
                     }
                     hashValues.add(hash);
                 }
@@ -171,12 +178,18 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             partitionOutput.setHashValues(hashValues);
 
             pixelsWriter.close();
-            workerMetrics.addOutputCostNs(writeCostTimer.stop());
+            writeCostTimer.stop();
+            partitionTimers.getWriteFileTimer().stop();
+            workerMetrics.addOutputCostNs(writeCostTimer.getElapsedNs());
             workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
             workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
 
             partitionOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(partitionOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return partitionOutput;
         }
         catch (Throwable e)
@@ -187,6 +200,11 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             partitionOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             return partitionOutput;
         }
+    }
+
+    private void writePerformanceToFile() {
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, partitionTimers, logger, "PartitionWorker", "/tmp/partition_performance_metrics.csv");
     }
 
     /**
@@ -217,11 +235,13 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
         int numReadRequests = 0;
         for (InputInfo inputInfo : scanInputs)
         {
+            partitionTimers.getReadTimer().start();
             readCostTimer.start();
             try (PixelsReader pixelsReader = WorkerCommon.getReader(
                     inputInfo.getPath(), WorkerCommon.getStorage(inputScheme)))
             {
                 readCostTimer.stop();
+                partitionTimers.getReadTimer().stop();
                 if (inputInfo.getRgStart() >= pixelsReader.getRowGroupNum())
                 {
                     continue;
@@ -252,6 +272,7 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 computeCostTimer.start();
                 do
                 {
+                    partitionTimers.getComputeTimer().start();
                     rowBatch = scanner.filterAndProject(recordReader.readBatch(WorkerCommon.rowBatchSize));
                     if (rowBatch.size > 0)
                     {
@@ -264,8 +285,9 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                             }
                         }
                     }
+                    partitionTimers.getComputeTimer().stop();
                 } while (!rowBatch.endOfFile);
-                computeCostTimer.stop();
+                partitionTimers.getComputeTimer().stop();
                 computeCostTimer.minus(recordReader.getReadTimeNanos());
                 readCostTimer.add(recordReader.getReadTimeNanos());
                 readBytes += recordReader.getCompletedBytes();

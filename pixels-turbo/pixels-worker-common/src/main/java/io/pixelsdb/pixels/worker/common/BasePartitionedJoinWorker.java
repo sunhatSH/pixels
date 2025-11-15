@@ -35,6 +35,7 @@ import io.pixelsdb.pixels.planner.plan.physical.input.PartitionedJoinInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.JoinOutput;
 import org.apache.logging.log4j.Logger;
 
+import java.io.*;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -53,6 +54,9 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+
+    // Fine-grained timers for four stages
+    private final WorkerMetrics.StageTimers partitionedJoinTimers = new WorkerMetrics.StageTimers();
 
     public BasePartitionedJoinWorker(WorkerContext context)
     {
@@ -229,10 +233,12 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                                     joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, parts, rightColumnsToRead,
                                             rightInputStorageInfo.getScheme(), hashValues,
-                                            numPartition, outputPartitionInfo, result, workerMetrics) :
+                                            numPartition, outputPartitionInfo, result, workerMetrics,
+                                            partitionedJoinTimers)
+                                    :
                                     joinWithRightTable(transId, timestamp, joiner, parts, rightColumnsToRead,
                                             rightInputStorageInfo.getScheme(), hashValues, numPartition,
-                                            result.get(0), workerMetrics);
+                                            result.get(0), workerMetrics, partitionedJoinTimers);
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during hash join", e);
@@ -257,6 +263,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
             String outputPath = outputFolder + outputInfo.getFileNames().get(0);
             try
             {
+                partitionedJoinTimers.getWriteFileTimer().start();
                 WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
                 PixelsWriter pixelsWriter;
                 if (partitionOutput)
@@ -273,7 +280,9 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         {
                             for (VectorizedRowBatch batch : batches)
                             {
+                                partitionedJoinTimers.getWriteCacheTimer().start();
                                 pixelsWriter.addRowBatch(batch, hash);
+                                partitionedJoinTimers.getWriteCacheTimer().stop();
                             }
                         }
                     }
@@ -286,10 +295,14 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                     ConcurrentLinkedQueue<VectorizedRowBatch> rowBatches = result.get(0);
                     for (VectorizedRowBatch rowBatch : rowBatches)
                     {
+                        partitionedJoinTimers.getWriteCacheTimer().start();
                         pixelsWriter.addRowBatch(rowBatch);
+                        partitionedJoinTimers.getWriteCacheTimer().stop();
                     }
                 }
                 pixelsWriter.close();
+                writeCostTimer.stop();
+                partitionedJoinTimers.getWriteFileTimer().stop();
                 workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
                 workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
                 joinOutput.addOutput(outputPath, pixelsWriter.getNumRowGroup());
@@ -346,6 +359,10 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
 
             joinOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(joinOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return joinOutput;
         } catch (Throwable e)
         {
@@ -475,7 +492,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
     protected static int joinWithRightTable(
             long transId, long timestamp, Joiner joiner, List<String> rightParts, String[] rightCols, Storage.Scheme rightScheme,
             List<Integer> hashValues, int numPartition, ConcurrentLinkedQueue<VectorizedRowBatch> joinResult,
-            WorkerMetrics workerMetrics)
+            WorkerMetrics workerMetrics, WorkerMetrics.StageTimers partitionedJoinTimers)
     {
         int joinedRows = 0;
         WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
@@ -487,11 +504,14 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
             for (Iterator<String> it = rightParts.iterator(); it.hasNext(); )
             {
                 String rightPartitioned = it.next();
+                // Use stage timers for read timing
+                partitionedJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         rightPartitioned, WorkerCommon.getStorage(rightScheme)))
                 {
                     readCostTimer.stop();
+                    partitionedJoinTimers.getReadTimer().stop();
                     Set<Integer> rightHashValues;
                     if (rightScheme.equals(Storage.Scheme.httpstream))
                     {
@@ -517,6 +537,8 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         PixelsRecordReader recordReader = pixelsReader.read(option);
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
+                        // Use stage timers for compute timing
+                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
@@ -535,6 +557,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                             }
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
+                        partitionedJoinTimers.getComputeTimer().stop();
                         computeCostTimer.minus(recordReader.getReadTimeNanos());
                         readCostTimer.add(recordReader.getReadTimeNanos());
                         readBytes += recordReader.getCompletedBytes();
@@ -571,25 +594,32 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
     }
 
     /**
-     * Scan the partitioned file of the right table, do the join, and partition the output.
+     * Scan the partitioned file of the right table, do the join, and partition the
+     * output.
      *
-     * @param transId the transaction id used by I/O scheduler
-     * @param timestamp the transaction timestamp
-     * @param joiner the joiner for the partitioned join
-     * @param rightParts the information of partitioned files of the right table
-     * @param rightCols the column names of the right table
-     * @param rightScheme the storage scheme of the right table
-     * @param hashValues the hash values that are processed by this join worker
-     * @param numPartition the total number of partitions
-     * @param postPartitionInfo the partition information of post partitioning
-     * @param partitionResult the container of the join and post partitioning result
-     * @param workerMetrics the collector of the performance metrics
+     * @param transId               the transaction id used by I/O scheduler
+     * @param timestamp             the transaction timestamp
+     * @param joiner                the joiner for the partitioned join
+     * @param rightParts            the information of partitioned files of the
+     *                              right table
+     * @param rightCols             the column names of the right table
+     * @param rightScheme           the storage scheme of the right table
+     * @param hashValues            the hash values that are processed by this join
+     *                              worker
+     * @param numPartition          the total number of partitions
+     * @param postPartitionInfo     the partition information of post partitioning
+     * @param partitionResult       the container of the join and post partitioning
+     *                              result
+     * @param workerMetrics         the collector of the performance metrics
+     * @param partitionedJoinTimers the stage timers for partitioned join
+     *                              performance metrics
      * @return the number of joined rows produced in this split
      */
     protected static int joinWithRightTableAndPartition(
             long transId, long timestamp, Joiner joiner, List<String> rightParts, String[] rightCols, Storage.Scheme rightScheme,
             List<Integer> hashValues, int numPartition, PartitionInfo postPartitionInfo,
-            List<ConcurrentLinkedQueue<VectorizedRowBatch>> partitionResult, WorkerMetrics workerMetrics)
+            List<ConcurrentLinkedQueue<VectorizedRowBatch>> partitionResult, WorkerMetrics workerMetrics,
+            WorkerMetrics.StageTimers partitionedJoinTimers)
     {
         requireNonNull(postPartitionInfo, "outputPartitionInfo is null");
         Partitioner partitioner = new Partitioner(postPartitionInfo.getNumPartition(),
@@ -604,11 +634,14 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
             for (Iterator<String> it = rightParts.iterator(); it.hasNext(); )
             {
                 String rightPartitioned = it.next();
+                // Use stage timers for read timing
+                partitionedJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         rightPartitioned, WorkerCommon.getStorage(rightScheme)))
                 {
                     readCostTimer.stop();
+                    partitionedJoinTimers.getReadTimer().stop();
                     Set<Integer> rightHashValues;
                     if (rightScheme.equals(Storage.Scheme.httpstream))
                     {
@@ -634,6 +667,8 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         PixelsRecordReader recordReader = pixelsReader.read(option);
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
+                        // Use stage timers for compute timing
+                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
@@ -656,6 +691,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                             }
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
+                        partitionedJoinTimers.getComputeTimer().stop();
                         computeCostTimer.minus(recordReader.getReadTimeNanos());
                         readCostTimer.add(recordReader.getReadTimeNanos());
                         readBytes += recordReader.getCompletedBytes();
@@ -698,4 +734,11 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
         workerMetrics.addComputeCostNs(computeCostTimer.getElapsedNs());
         return joinedRows;
     }
+
+    private void writePerformanceToFile() {
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, partitionedJoinTimers, logger, "PartitionedJoinWorker",
+                "/tmp/partitioned_join_performance_metrics.csv");
+    }
+
 }

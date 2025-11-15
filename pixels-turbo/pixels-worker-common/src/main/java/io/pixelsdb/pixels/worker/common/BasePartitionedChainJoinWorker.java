@@ -323,6 +323,12 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
 
             joinOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(joinOutput, workerMetrics);
+
+            // Write basic performance metrics
+            WorkerMetrics.PerformanceMetricsWriter.writeBasicPerformanceToFile(
+                    workerMetrics, logger, "PartitionedChainJoinWorker",
+                    "/tmp/partitioned_chain_join_performance_metrics.csv");
+
             return joinOutput;
         } catch (Throwable e)
         {
@@ -349,7 +355,8 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
             BroadcastTableInfo t2 = chainTables.get(1);
             ChainJoinInfo currChainJoin = chainJoinInfos.get(0);
             WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
-            Joiner currJoiner = BaseBroadcastChainJoinWorker.buildFirstJoiner(transId, timestamp, executor, t1, t2, currChainJoin, workerMetrics);
+            Joiner currJoiner = BaseBroadcastChainJoinWorker.buildFirstJoiner(transId, timestamp, executor, t1, t2,
+                    currChainJoin, workerMetrics);
             for (int i = 1; i < chainTables.size() - 1; ++i)
             {
                 BroadcastTableInfo currRightTable = chainTables.get(i);
@@ -368,7 +375,8 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
                         nextResultSchema, nextChainJoin.getLargeColumnAlias(),
                         nextChainJoin.getLargeProjection(), nextChainTable.getKeyColumnIds());
 
-                BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, nextJoiner, currRightTable, workerMetrics);
+                BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, nextJoiner,
+                        currRightTable, workerMetrics);
                 currJoiner = nextJoiner;
                 currChainJoin = nextChainJoin;
             }
@@ -379,7 +387,8 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
                     lastChainJoin.getSmallProjection(), currChainJoin.getKeyColumnIds(),
                     lastResultSchema, lastChainJoin.getLargeColumnAlias(),
                     lastChainJoin.getLargeProjection(), lastChainJoin.getKeyColumnIds());
-            BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, finalJoiner, lastChainTable, workerMetrics);
+            BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, finalJoiner,
+                    lastChainTable, workerMetrics);
             workerMetrics.addInputCostNs(readCostTimer.getElapsedNs());
             return finalJoiner;
         } catch (Throwable e)

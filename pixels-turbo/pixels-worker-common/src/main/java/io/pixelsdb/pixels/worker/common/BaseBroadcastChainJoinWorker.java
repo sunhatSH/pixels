@@ -248,6 +248,10 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
 
             joinOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(joinOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return joinOutput;
         } catch (Throwable e)
         {
@@ -281,7 +285,8 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
             WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
             BroadcastTableInfo t1 = leftTables.get(0);
             BroadcastTableInfo t2 = leftTables.get(1);
-            Joiner currJoiner = buildFirstJoiner(transId, timestamp, executor, t1, t2, chainJoinInfos.get(0), workerMetrics);
+            Joiner currJoiner = buildFirstJoiner(transId, timestamp, executor, t1, t2, chainJoinInfos.get(0),
+                    workerMetrics);
             for (int i = 1; i < leftTables.size() - 1; ++i)
             {
                 BroadcastTableInfo currRightTable = leftTables.get(i);
@@ -336,7 +341,8 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
      */
     protected static Joiner buildFirstJoiner(
             long transId, long timestamp, ExecutorService executor, BroadcastTableInfo t1, BroadcastTableInfo t2,
-            ChainJoinInfo joinInfo, WorkerMetrics workerMetrics) throws ExecutionException, InterruptedException
+            ChainJoinInfo joinInfo, WorkerMetrics workerMetrics)
+            throws ExecutionException, InterruptedException
     {
         AtomicReference<TypeDescription> t1Schema = new AtomicReference<>();
         AtomicReference<TypeDescription> t2Schema = new AtomicReference<>();
@@ -360,7 +366,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                 try
                 {
                     BaseBroadcastJoinWorker.buildHashTable(transId, timestamp, (HashJoiner) joiner, inputs, t1.getStorageInfo().getScheme(),
-                            !t1.isBase(), t1.getColumnsToRead(), t1Filter, workerMetrics);
+                            !t1.isBase(), t1.getColumnsToRead(), t1Filter, workerMetrics, null);
                 }
                 catch (Throwable e)
                 {
@@ -390,7 +396,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
      * @throws InterruptedException
      */
     protected static void chainJoin(long transId, long timestamp, ExecutorService executor, Joiner currJoiner,
-                                    Joiner nextJoiner, BroadcastTableInfo currRightTable, WorkerMetrics workerMetrics)
+            Joiner nextJoiner, BroadcastTableInfo currRightTable, WorkerMetrics workerMetrics)
             throws ExecutionException, InterruptedException
     {
         TableScanFilter currRightFilter = JSON.parseObject(currRightTable.getFilter(), TableScanFilter.class);
@@ -420,17 +426,21 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
     /**
      * Perform the join of two left tables on one split of the right one.
      *
-     * @param transId the transaction id
-     * @param timestamp the transaction timestamp
-     * @param currJoiner the joiner of the two left tables
-     * @param nextJoiner the joiner of the next join
-     * @param rightInputs the information of the input files in the split of the right one
-     *                   of the two left tables
-     * @param rightScheme the storage scheme of the right table
-     * @param checkExistence whether check the existence of the input files
-     * @param rightCols the column names of the right one of the two left tables
-     * @param rightFilter the filter of the right one of the two left tables
-     * @param workerMetrics the collector of the performance metrics
+     * @param transId        the transaction id
+     * @param timestamp      the transaction timestamp
+     * @param currJoiner     the joiner of the two left tables
+     * @param nextJoiner     the joiner of the next join
+     * @param rightInputs    the information of the input files in the
+     *                       split of the right one
+     *                       of the two left tables
+     * @param rightScheme    the storage scheme of the right table
+     * @param checkExistence whether check the existence of the input
+     *                       files
+     * @param rightCols      the column names of the right one of the two
+     *                       left tables
+     * @param rightFilter    the filter of the right one of the two left
+     *                       tables
+     * @param workerMetrics  the collector of the performance metrics
      */
     private static void chainJoinSplit(
             long transId, long timestamp, Joiner currJoiner, Joiner nextJoiner, List<InputInfo> rightInputs,
@@ -516,5 +526,11 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
         workerMetrics.addNumReadRequests(numReadRequests);
         workerMetrics.addComputeCostNs(computeCostTimer.getElapsedNs());
         workerMetrics.addInputCostNs(readCostTimer.getElapsedNs());
+    }
+
+    private void writePerformanceToFile() {
+        WorkerMetrics.PerformanceMetricsWriter.writeBasicPerformanceToFile(
+                workerMetrics, logger, "BroadcastChainJoinWorker",
+                "/tmp/broadcast_chain_join_performance_metrics.csv");
     }
 }

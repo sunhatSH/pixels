@@ -38,6 +38,7 @@ import io.pixelsdb.pixels.planner.plan.physical.input.AggregationInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.AggregationOutput;
 import org.apache.logging.log4j.Logger;
 
+import java.io.*;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -56,6 +57,9 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+
+    // Fine-grained timers for four stages
+    private final WorkerMetrics.StageTimers aggregationTimers = new WorkerMetrics.StageTimers();
 
     public BaseAggregationWorker(WorkerContext context)
     {
@@ -194,11 +198,14 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                 throw new WorkerException("error occurred threads, please check the stacktrace before this log record");
             }
 
+            aggregationTimers.getWriteFileTimer().start();
             WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
             PixelsWriter pixelsWriter = WorkerCommon.getWriter(aggregator.getOutputSchema(),
                     WorkerCommon.getStorage(outputStorageInfo.getScheme()),
                     outputPath, encoding, false, null);
+            aggregationTimers.getWriteCacheTimer().start();
             aggregator.writeAggrOutput(pixelsWriter);
+            aggregationTimers.getWriteCacheTimer().stop();
             pixelsWriter.close();
             if (outputStorageInfo.getScheme() == Storage.Scheme.minio)
             {
@@ -208,12 +215,18 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                     TimeUnit.MILLISECONDS.sleep(10);
                 }
             }
-            workerMetrics.addOutputCostNs(writeCostTimer.stop());
+            writeCostTimer.stop();
+            aggregationTimers.getWriteFileTimer().stop();
+            workerMetrics.addOutputCostNs(writeCostTimer.getElapsedNs());
             workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
             workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
             aggregationOutput.addOutput(outputPath, pixelsWriter.getNumRowGroup());
             aggregationOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(aggregationOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return aggregationOutput;
         } catch (Throwable e)
         {
@@ -255,11 +268,13 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
             for (Iterator<String> it = inputFiles.iterator(); it.hasNext(); )
             {
                 String inputFile = it.next();
+                aggregationTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         inputFile, WorkerCommon.getStorage(inputScheme)))
                 {
                     readCostTimer.stop();
+                    aggregationTimers.getReadTimer().stop();
                     if (pixelsReader.getRowGroupNum() == 0)
                     {
                         it.remove();
@@ -280,12 +295,14 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                         computeCostTimer.start();
                         do
                         {
+                            aggregationTimers.getComputeTimer().start();
                             rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
                             if (rowBatch.size > 0)
                             {
                                 numRows += rowBatch.size;
                                 aggregator.aggregate(rowBatch);
                             }
+                            aggregationTimers.getComputeTimer().stop();
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
                         computeCostTimer.minus(recordReader.getReadTimeNanos());
@@ -358,4 +375,11 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
         workerMetrics.addComputeCostNs(computeCostTimer.getElapsedNs());
         return numRows;
     }
+
+    private void writePerformanceToFile() {
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, aggregationTimers, logger, "AggregationWorker",
+                "/tmp/aggregation_performance_metrics.csv");
+    }
+
 }

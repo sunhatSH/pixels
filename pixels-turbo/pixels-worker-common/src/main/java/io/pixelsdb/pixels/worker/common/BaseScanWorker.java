@@ -38,6 +38,7 @@ import io.pixelsdb.pixels.planner.plan.physical.input.ScanInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.ScanOutput;
 import org.apache.logging.log4j.Logger;
 
+import java.io.*; // For file writing
 import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
@@ -60,6 +61,9 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+
+    // Fine-grained timers for four stages
+    private final WorkerMetrics.StageTimers scanTimers = new WorkerMetrics.StageTimers();
 
     public BaseScanWorker(WorkerContext context)
     {
@@ -207,6 +211,10 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
 
             scanOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(scanOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return scanOutput;
         } catch (Throwable e)
         {
@@ -255,10 +263,12 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
         int numReadRequests = 0;
         for (InputInfo inputInfo : scanInputs)
         {
+            scanTimers.getReadTimer().start();
             readCostTimer.start();
             try (PixelsReader pixelsReader = WorkerCommon.getReader(inputInfo.getPath(), WorkerCommon.getStorage(inputScheme)))
             {
                 readCostTimer.stop();
+                scanTimers.getReadTimer().stop();
                 if (inputInfo.getRgStart() >= pixelsReader.getRowGroupNum())
                 {
                     continue;
@@ -288,7 +298,11 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                 computeCostTimer.start();
                 do
                 {
-                    rowBatch = scanner.filterAndProject(recordReader.readBatch(WorkerCommon.rowBatchSize));
+                    scanTimers.getComputeTimer().start();
+                    rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                    rowBatch = scanner.filterAndProject(rowBatch);
+                    scanTimers.getComputeTimer().stop();
+
                     if (rowBatch.size > 0)
                     {
                         if (partialAggregate)
@@ -296,7 +310,9 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                             aggregator.aggregate(rowBatch);
                         } else
                         {
+                            scanTimers.getWriteCacheTimer().start();
                             pixelsWriter.addRowBatch(rowBatch);
+                            scanTimers.getWriteCacheTimer().stop();
                         }
                     }
                 } while (!rowBatch.endOfFile);
@@ -319,6 +335,7 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
             {
                 // This is a pure scan without aggregation, compute time is the file writing time.
                 writeCostTimer.add(computeCostTimer.getElapsedNs());
+                scanTimers.getWriteFileTimer().start();
                 writeCostTimer.start();
                 pixelsWriter.close();
                 if (outputScheme == Storage.Scheme.minio)
@@ -330,6 +347,7 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                     }
                 }
                 writeCostTimer.stop();
+                scanTimers.getWriteFileTimer().stop();
                 workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
                 workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
                 workerMetrics.addOutputCostNs(writeCostTimer.getElapsedNs());
@@ -349,5 +367,11 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
             throw new WorkerException(
                     "failed finish writing and close the output file '" + outputPath + "'", e);
         }
+    }
+
+    private void writePerformanceToFile() 
+    {
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, scanTimers, logger, "ScanWorker", "/tmp/scan_performance_metrics.csv");
     }
 }

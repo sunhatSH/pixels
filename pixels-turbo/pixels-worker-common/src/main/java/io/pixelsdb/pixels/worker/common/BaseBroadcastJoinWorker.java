@@ -35,6 +35,7 @@ import io.pixelsdb.pixels.planner.plan.physical.input.BroadcastJoinInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.JoinOutput;
 import org.apache.logging.log4j.Logger;
 
+import java.io.*;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -53,6 +54,9 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+
+    // Fine-grained timers for four stages
+    public final WorkerMetrics.StageTimers broadcastJoinTimers = new WorkerMetrics.StageTimers();
 
     public BaseBroadcastJoinWorker(WorkerContext context)
     {
@@ -151,7 +155,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     try
                     {
                         buildHashTable(transId, timestamp, (HashJoiner) joiner, inputs, leftInputStorageInfo.getScheme(),
-                                !leftTable.isBase(), leftCols, leftFilter, workerMetrics);
+                                !leftTable.isBase(), leftCols, leftFilter, workerMetrics, broadcastJoinTimers);
                     }
                     catch (Throwable e)
                     {
@@ -189,6 +193,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     threadPool.execute(() -> {
                         try
                         {
+                            // Use stage timers for compute timing - covers the entire join operation
+                            broadcastJoinTimers.getComputeTimer().start();
                             int numJoinedRows = partitionOutput ?
                                     joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
@@ -196,8 +202,10 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                                             outputPartitionInfo, result, workerMetrics) :
                                     joinWithRightTable(transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
                                             !rightTable.isBase(), rightCols, rightFilter, result.get(0), workerMetrics);
+                            broadcastJoinTimers.getComputeTimer().stop();
                         } catch (Throwable e)
                         {
+                            broadcastJoinTimers.getComputeTimer().stop(); // Stop timer even on exception
                             throw new WorkerException("error during broadcast join", e);
                         }
                     });
@@ -222,6 +230,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
             try
             {
                 PixelsWriter pixelsWriter;
+                broadcastJoinTimers.getWriteFileTimer().start();
                 WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
                 if (partitionOutput)
                 {
@@ -237,7 +246,9 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                         {
                             for (VectorizedRowBatch batch : batches)
                             {
+                                broadcastJoinTimers.getWriteCacheTimer().start();
                                 pixelsWriter.addRowBatch(batch, hash);
+                                broadcastJoinTimers.getWriteCacheTimer().stop();
                             }
                         }
                     }
@@ -251,10 +262,14 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     ConcurrentLinkedQueue<VectorizedRowBatch> rowBatches = result.get(0);
                     for (VectorizedRowBatch rowBatch : rowBatches)
                     {
+                        broadcastJoinTimers.getWriteCacheTimer().start();
                         pixelsWriter.addRowBatch(rowBatch);
+                        broadcastJoinTimers.getWriteCacheTimer().stop();
                     }
                 }
                 pixelsWriter.close();
+                writeCostTimer.stop();
+                broadcastJoinTimers.getWriteFileTimer().stop();
                 joinOutput.addOutput(outputPath, pixelsWriter.getNumRowGroup());
                 if (outputStorageInfo.getScheme() == Storage.Scheme.minio)
                 {
@@ -275,6 +290,10 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
 
             joinOutput.setDurationMs((int) (System.currentTimeMillis() - startTime));
             WorkerCommon.setPerfMetrics(joinOutput, workerMetrics);
+
+            // Write performance to file and log
+            writePerformanceToFile();
+
             return joinOutput;
         } catch (Throwable e)
         {
@@ -302,7 +321,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
      */
     public static void buildHashTable(long transId, long timestamp, HashJoiner joiner, List<InputInfo> leftInputs,
                                       Storage.Scheme leftScheme, boolean checkExistence, String[] leftCols,
-                                      TableScanFilter leftFilter, WorkerMetrics workerMetrics)
+            TableScanFilter leftFilter, WorkerMetrics workerMetrics, WorkerMetrics.StageTimers broadcastJoinTimers)
     {
         WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
         WorkerMetrics.Timer computeCostTimer = new WorkerMetrics.Timer();
@@ -313,11 +332,14 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
             for (Iterator<InputInfo> it = leftInputs.iterator(); it.hasNext(); )
             {
                 InputInfo input = it.next();
+                // Use stage timers for read timing
+                broadcastJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         input.getPath(), WorkerCommon.getStorage(leftScheme)))
                 {
                     readCostTimer.stop();
+                    broadcastJoinTimers.getReadTimer().stop();
                     if (input.getRgStart() >= pixelsReader.getRowGroupNum())
                     {
                         it.remove();
@@ -382,17 +404,18 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
     /**
      * Scan the input files of the right table and do the join.
      *
-     * @param transId the transaction id used by I/O scheduler
-     * @param timestamp the transaction timestamp
-     * @param joiner the joiner for the broadcast join
-     * @param rightInputs the information of input files of the right table,
-     *                    the list <b>must be mutable</b>
-     * @param rightScheme the storage scheme of the right table
-     * @param checkExistence whether check the existence of the input files
-     * @param rightCols the column names of the right table
-     * @param rightFilter the table scan filter on the right table
-     * @param joinResult the container of the join result
-     * @param workerMetrics the collector of the performance metrics
+     * @param transId             the transaction id used by I/O scheduler
+     * @param timestamp           the transaction timestamp
+     * @param joiner              the joiner for the broadcast join
+     * @param rightInputs         the information of input files of the right table,
+     *                            the list <b>must be mutable</b>
+     * @param rightScheme         the storage scheme of the right table
+     * @param checkExistence      whether check the existence of the input files
+     * @param rightCols           the column names of the right table
+     * @param rightFilter         the table scan filter on the right table
+     * @param joinResult          the container of the join result
+     * @param workerMetrics       the collector of the performance metrics
+     * @param broadcastJoinTimers the timers for the broadcast join
      * @return the number of joined rows produced in this split
      */
     public static int joinWithRightTable(
@@ -608,4 +631,11 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
         workerMetrics.addComputeCostNs(computeCostTimer.getElapsedNs());
         return joinedRows;
     }
+
+    private void writePerformanceToFile() {
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, broadcastJoinTimers, logger, "BroadcastJoinWorker",
+                "/tmp/broadcast_join_performance_metrics.csv");
+    }
+
 }

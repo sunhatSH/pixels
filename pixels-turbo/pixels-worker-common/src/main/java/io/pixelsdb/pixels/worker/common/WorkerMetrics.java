@@ -19,9 +19,11 @@
  */
 package io.pixelsdb.pixels.worker.common;
 
+import java.io.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.logging.log4j.Logger;
 /**
  * @author hank
  * @create 2022-08-02
@@ -30,7 +32,7 @@ public class WorkerMetrics
 {
     public static class Timer
     {
-        private long elapsedNs = 0;
+        private final AtomicLong elapsedNs = new AtomicLong(0);
         private long startTime = 0L;
 
         public Timer start()
@@ -45,23 +47,74 @@ public class WorkerMetrics
         public long stop()
         {
             long endTime = System.nanoTime();
-            elapsedNs += endTime - startTime;
-            return elapsedNs;
+            elapsedNs.addAndGet(endTime - startTime);
+            return elapsedNs.get();
         }
 
         public void add(long timeNs)
         {
-            this.elapsedNs += timeNs;
+            this.elapsedNs.addAndGet(timeNs);
         }
 
         public void minus(long timeNs)
         {
-            this.elapsedNs -= timeNs;
+            this.elapsedNs.addAndGet(-timeNs);
         }
 
         public long getElapsedNs()
         {
-            return elapsedNs;
+            return elapsedNs.get();
+        }
+    }
+
+    /**
+     * A cluster of timers for the four performance stages: READ, COMPUTE,
+     * WRITE_CACHE, WRITE_FILE
+     */
+    public static class StageTimers {
+        private final Timer readTimer = new Timer();
+        private final Timer computeTimer = new Timer();
+        private final Timer writeCacheTimer = new Timer();
+        private final Timer writeFileTimer = new Timer();
+
+        public Timer getReadTimer() {
+            return readTimer;
+        }
+
+        public Timer getComputeTimer() {
+            return computeTimer;
+        }
+
+        public Timer getWriteCacheTimer() {
+            return writeCacheTimer;
+        }
+
+        public Timer getWriteFileTimer() {
+            return writeFileTimer;
+        }
+
+        public void clear() {
+            // Timers are cumulative, no need to clear individual elapsed times
+        }
+
+        public long getReadTimeMs() {
+            return readTimer.getElapsedNs() / 1_000_000;
+        }
+
+        public long getComputeTimeMs() {
+            return computeTimer.getElapsedNs() / 1_000_000;
+        }
+
+        public long getWriteCacheTimeMs() {
+            return writeCacheTimer.getElapsedNs() / 1_000_000;
+        }
+
+        public long getWriteFileTimeMs() {
+            return writeFileTimer.getElapsedNs() / 1_000_000;
+        }
+
+        public long getTotalTimeMs() {
+            return getReadTimeMs() + getComputeTimeMs() + getWriteCacheTimeMs() + getWriteFileTimeMs();
         }
     }
 
@@ -152,5 +205,100 @@ public class WorkerMetrics
     public void addComputeCostNs(long computeDurationNs)
     {
         this.computeCostNs.addAndGet(computeDurationNs);
+    }
+
+    /**
+     * Common performance metrics writer for all workers.
+     */
+    public static class PerformanceMetricsWriter {
+        public static void writePerformanceToFile(WorkerMetrics workerMetrics, StageTimers stageTimers,
+                Logger logger, String workerType, String csvFilePath) {
+            writePerformanceToFileWithFallback(workerMetrics, stageTimers, logger, workerType, csvFilePath, false);
+        }
+
+        public static void writeBasicPerformanceToFile(WorkerMetrics workerMetrics, Logger logger,
+                String workerType, String csvFilePath) {
+            writePerformanceToFileWithFallback(workerMetrics, null, logger, workerType, csvFilePath, true);
+        }
+
+        private static void writePerformanceToFileWithFallback(WorkerMetrics workerMetrics, StageTimers stageTimers,
+                Logger logger, String workerType, String csvFilePath, boolean useBasicMetricsOnly) {
+            long timestamp = System.currentTimeMillis();
+
+            // Original metrics in ms
+            long readTimeMs = workerMetrics.getInputCostNs() / 1_000_000;
+            long computeTimeMs = workerMetrics.getComputeCostNs() / 1_000_000;
+            long outputTimeMs = workerMetrics.getOutputCostNs() / 1_000_000;
+
+            long computeTimeMsNew, writeCacheTimeMs, writeFileTimeMs;
+            boolean hasDetailedTiming = stageTimers != null && !useBasicMetricsOnly;
+
+            if (hasDetailedTiming) {
+                // Use detailed stage timers
+                computeTimeMsNew = stageTimers.getComputeTimeMs();
+                writeCacheTimeMs = stageTimers.getWriteCacheTimeMs();
+                writeFileTimeMs = stageTimers.getWriteFileTimeMs();
+            } else {
+                // Fall back to basic WorkerMetrics
+                computeTimeMsNew = computeTimeMs;
+                writeCacheTimeMs = 0; // Not available in basic metrics
+                writeFileTimeMs = outputTimeMs;
+            }
+
+            long totalTimeMs = readTimeMs + computeTimeMsNew + writeCacheTimeMs + writeFileTimeMs;
+
+            // Calculate percentages (avoid division by zero)
+            double computePct = totalTimeMs > 0 ? ((double) computeTimeMsNew / totalTimeMs) * 100 : 0;
+            double writeCachePct = totalTimeMs > 0 ? ((double) writeCacheTimeMs / totalTimeMs) * 100 : 0;
+            double writeFilePct = totalTimeMs > 0 ? ((double) writeFileTimeMs / totalTimeMs) * 100 : 0;
+            double s3StoragePct = totalTimeMs > 0 ? ((double) (readTimeMs + writeFileTimeMs) / totalTimeMs) * 100 : 0;
+
+            // Write to Log
+            if (hasDetailedTiming) {
+                logger.info("Four-Stage Performance Metrics (ms): READ={}, COMPUTE={}, WRITE_CACHE={}, WRITE_FILE={}",
+                        readTimeMs, computeTimeMsNew, writeCacheTimeMs, writeFileTimeMs);
+                logger.info("Percentages: COMPUTE={:.2f}%, WRITE_CACHE={:.2f}%, WRITE_FILE={:.2f}%, S3 Storage={:.2f}%",
+                        computePct, writeCachePct, writeFilePct, s3StoragePct);
+            } else {
+                logger.info("Basic Performance Metrics (ms): READ={}, COMPUTE={}, OUTPUT={}",
+                        readTimeMs, computeTimeMs, outputTimeMs);
+                logger.info("Total Time: {} ms, Read Percentage: {:.2f}%", totalTimeMs,
+                        totalTimeMs > 0 ? (readTimeMs * 100.0 / totalTimeMs) : 0);
+            }
+
+            // Write to CSV file
+            try {
+                File csvFile = new File(csvFilePath);
+                boolean isNewFile = !csvFile.exists();
+
+                try (FileWriter writer = new FileWriter(csvFilePath, true)) // Append mode
+                {
+                    // Write header if file is new
+                    if (isNewFile) {
+                        if (hasDetailedTiming) {
+                            writer.write(
+                                    "Timestamp,WorkerType,ReadTimeMs,ComputeTimeMs,WriteCacheTimeMs,WriteFileTimeMs,ComputePct,WriteCachePct,WriteFilePct,S3StoragePct\n");
+                        } else {
+                            writer.write(
+                                    "Timestamp,WorkerType,ReadTimeMs,ComputeTimeMs,OutputTimeMs,TotalTimeMs,ReadPct\n");
+                        }
+                    }
+
+                    // Write data row
+                    if (hasDetailedTiming) {
+                        writer.write(String.format("%d,%s,%d,%d,%d,%d,%.2f,%.2f,%.2f,%.2f\n",
+                                timestamp, workerType, readTimeMs, computeTimeMsNew, writeCacheTimeMs, writeFileTimeMs,
+                                computePct, writeCachePct, writeFilePct, s3StoragePct));
+                    } else {
+                        double readPct = totalTimeMs > 0 ? (readTimeMs * 100.0 / totalTimeMs) : 0;
+                        writer.write(String.format("%d,%s,%d,%d,%d,%d,%.2f\n",
+                                timestamp, workerType, readTimeMs, computeTimeMs, outputTimeMs, totalTimeMs, readPct));
+                    }
+                    writer.flush();
+                }
+            } catch (IOException e) {
+                logger.error("Failed to write performance metrics to CSV file: " + e.getMessage());
+            }
+        }
     }
 }

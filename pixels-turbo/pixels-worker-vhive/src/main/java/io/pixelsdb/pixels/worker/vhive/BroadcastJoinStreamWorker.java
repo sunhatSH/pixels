@@ -217,7 +217,7 @@ public class BroadcastJoinStreamWorker extends BaseBroadcastJoinWorker implement
                     try
                     {
                         buildHashTable(transId, timestamp, joiner, inputs, leftInputStorageInfo.getScheme(),
-                                !leftTable.isBase(), leftColumnsToRead, leftFilter, workerMetrics);
+                                !leftTable.isBase(), leftColumnsToRead, leftFilter, workerMetrics, broadcastJoinTimers);
                     }
                     catch (Throwable e)
                     {

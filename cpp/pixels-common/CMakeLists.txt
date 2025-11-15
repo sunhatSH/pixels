@@ -61,7 +61,7 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS $ENV{PIXELS_SRC}/proto/pixels.proto)
 add_library(pixels-common ${pixels_common_cxx} ${PROTO_SRCS} ${PROTO_HDRS})
 
 # liburing
-set(LIBURING_GIT_REPOSITORY git@github.com:axboe/liburing.git)
+set(LIBURING_GIT_REPOSITORY https://github.com/axboe/liburing.git)
 set(LIBURING_GIT_TAG liburing-2.2)
 set(LIBURING_BUILD_COMMAND make -j)
 
