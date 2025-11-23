@@ -210,7 +210,7 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
                         try
                         {
                             BasePartitionedJoinWorker.buildHashTable(transId, timestamp, (HashJoiner) partitionJoiner, parts, leftColumnsToRead,
-                                    leftInputStorageInfo.getScheme(), hashValues, numPartition, workerMetrics);
+                                    leftInputStorageInfo.getScheme(), hashValues, numPartition, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during hash table construction", e);
@@ -356,7 +356,7 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
             ChainJoinInfo currChainJoin = chainJoinInfos.get(0);
             WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
             Joiner currJoiner = BaseBroadcastChainJoinWorker.buildFirstJoiner(transId, timestamp, executor, t1, t2,
-                    currChainJoin, workerMetrics);
+                    currChainJoin, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
             for (int i = 1; i < chainTables.size() - 1; ++i)
             {
                 BroadcastTableInfo currRightTable = chainTables.get(i);
@@ -376,7 +376,7 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
                         nextChainJoin.getLargeProjection(), nextChainTable.getKeyColumnIds());
 
                 BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, nextJoiner,
-                        currRightTable, workerMetrics);
+                        currRightTable, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
                 currJoiner = nextJoiner;
                 currChainJoin = nextChainJoin;
             }
@@ -388,7 +388,7 @@ public class BasePartitionedChainJoinWorker extends Worker<PartitionedChainJoinI
                     lastResultSchema, lastChainJoin.getLargeColumnAlias(),
                     lastChainJoin.getLargeProjection(), lastChainJoin.getKeyColumnIds());
             BaseBroadcastChainJoinWorker.chainJoin(transId, timestamp, executor, currJoiner, finalJoiner,
-                    lastChainTable, workerMetrics);
+                    lastChainTable, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
             workerMetrics.addInputCostNs(readCostTimer.getElapsedNs());
             return finalJoiner;
         } catch (Throwable e)

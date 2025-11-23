@@ -225,7 +225,7 @@ public class BasePartitionedChainJoinStreamWorker extends Worker<PartitionedChai
                         try
                         {
                             BasePartitionedJoinWorker.buildHashTable(transId, timestamp, partitionJoiner, parts, leftColumnsToRead,
-                                    leftInputStorageInfo.getScheme(), hashValues, numPartition, workerMetrics);
+                                    leftInputStorageInfo.getScheme(), hashValues, numPartition, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during hash table construction", e);

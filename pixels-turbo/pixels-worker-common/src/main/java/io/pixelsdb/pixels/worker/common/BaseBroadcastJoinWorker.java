@@ -199,9 +199,11 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                                     joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
                                             !rightTable.isBase(), rightCols, rightFilter,
-                                            outputPartitionInfo, result, workerMetrics) :
+                                            outputPartitionInfo, result, workerMetrics, broadcastJoinTimers)
+                                    :
                                     joinWithRightTable(transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
-                                            !rightTable.isBase(), rightCols, rightFilter, result.get(0), workerMetrics);
+                                            !rightTable.isBase(), rightCols, rightFilter, result.get(0), workerMetrics,
+                                            broadcastJoinTimers);
                             broadcastJoinTimers.getComputeTimer().stop();
                         } catch (Throwable e)
                         {
@@ -268,7 +270,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     }
                 }
                 pixelsWriter.close();
-                writeCostTimer.stop();
+                long writeCostNs = writeCostTimer.stop();
                 broadcastJoinTimers.getWriteFileTimer().stop();
                 joinOutput.addOutput(outputPath, pixelsWriter.getNumRowGroup());
                 if (outputStorageInfo.getScheme() == Storage.Scheme.minio)
@@ -279,7 +281,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                         TimeUnit.MILLISECONDS.sleep(10);
                     }
                 }
-                workerMetrics.addOutputCostNs(writeCostTimer.stop());
+                workerMetrics.addOutputCostNs(writeCostNs);
                 workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
                 workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
             } catch (Throwable e)
@@ -357,6 +359,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
 
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
+                    // Sync compute timer with stage timers
+                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
@@ -369,6 +373,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                         }
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
+                    broadcastJoinTimers.getComputeTimer().stop();
                     computeCostTimer.minus(recordReader.getReadTimeNanos());
                     readCostTimer.add(recordReader.getReadTimeNanos());
                     readBytes += recordReader.getCompletedBytes();
@@ -421,7 +426,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
     public static int joinWithRightTable(
             long transId, long timestamp, Joiner joiner, List<InputInfo> rightInputs, Storage.Scheme rightScheme,
             boolean checkExistence, String[] rightCols, TableScanFilter rightFilter,
-            ConcurrentLinkedQueue<VectorizedRowBatch> joinResult, WorkerMetrics workerMetrics)
+            ConcurrentLinkedQueue<VectorizedRowBatch> joinResult, WorkerMetrics workerMetrics,
+            WorkerMetrics.StageTimers broadcastJoinTimers)
     {
         int joinedRows = 0;
         WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
@@ -433,11 +439,14 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
             for (Iterator<InputInfo> it = rightInputs.iterator(); it.hasNext(); )
             {
                 InputInfo input = it.next();
+                // Use stage timers for read timing
+                broadcastJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         input.getPath(), WorkerCommon.getStorage(rightScheme)))
                 {
                     readCostTimer.stop();
+                    broadcastJoinTimers.getReadTimer().stop();
                     if (rightScheme != Storage.Scheme.httpstream)
                     {
                         if (input.getRgStart() >= pixelsReader.getRowGroupNum())
@@ -457,6 +466,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
 
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
+                    // Sync compute timer with stage timers
+                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
@@ -477,6 +488,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                         }
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
+                    broadcastJoinTimers.getComputeTimer().stop();
                     computeCostTimer.minus(recordReader.getReadTimeNanos());
                     readCostTimer.add(recordReader.getReadTimeNanos());
                     readBytes += recordReader.getCompletedBytes();
@@ -530,7 +542,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
     public static int joinWithRightTableAndPartition(
             long transId, long timestamp, Joiner joiner, List<InputInfo> rightInputs, Storage.Scheme rightScheme,
             boolean checkExistence, String[] rightCols, TableScanFilter rightFilter, PartitionInfo postPartitionInfo,
-            List<ConcurrentLinkedQueue<VectorizedRowBatch>> partitionResult, WorkerMetrics workerMetrics)
+            List<ConcurrentLinkedQueue<VectorizedRowBatch>> partitionResult, WorkerMetrics workerMetrics,
+            WorkerMetrics.StageTimers broadcastJoinTimers)
     {
         requireNonNull(postPartitionInfo, "outputPartitionInfo is null");
         Partitioner partitioner = new Partitioner(postPartitionInfo.getNumPartition(),
@@ -545,11 +558,14 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
             for (Iterator<InputInfo> it = rightInputs.iterator(); it.hasNext(); )
             {
                 InputInfo input = it.next();
+                // Use stage timers for read timing
+                broadcastJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         input.getPath(), WorkerCommon.getStorage(rightScheme)))
                 {
                     readCostTimer.stop();
+                    broadcastJoinTimers.getReadTimer().stop();
                     if (input.getRgStart() >= pixelsReader.getRowGroupNum())
                     {
                         it.remove();
@@ -566,6 +582,8 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
 
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
+                    // Sync compute timer with stage timers
+                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
@@ -590,6 +608,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                         }
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
+                    broadcastJoinTimers.getComputeTimer().stop();
                     computeCostTimer.minus(recordReader.getReadTimeNanos());
                     readCostTimer.add(recordReader.getReadTimeNanos());
                     readBytes += recordReader.getCompletedBytes();

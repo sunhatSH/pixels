@@ -182,7 +182,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                     try
                     {
                         buildHashTable(transId, timestamp, (HashJoiner) joiner, parts, leftColumnsToRead, leftInputStorageInfo.getScheme(),
-                                hashValues, numPartition, workerMetrics);
+                                hashValues, numPartition, workerMetrics, partitionedJoinTimers);
                     }
                     catch (Throwable e)
                     {
@@ -301,7 +301,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                     }
                 }
                 pixelsWriter.close();
-                writeCostTimer.stop();
+                long writeCostNs = writeCostTimer.stop();
                 partitionedJoinTimers.getWriteFileTimer().stop();
                 workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
                 workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
@@ -350,7 +350,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         }
                     }
                 }
-                workerMetrics.addOutputCostNs(writeCostTimer.stop());
+                workerMetrics.addOutputCostNs(writeCostNs);
             } catch (Throwable e)
             {
                 throw new WorkerException(
@@ -390,7 +390,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
 
     protected static void buildHashTable(long transId, long timestamp, HashJoiner joiner, List<String> leftParts, String[] leftCols,
                                          Storage.Scheme leftScheme, List<Integer> hashValues, int numPartition,
-                                         WorkerMetrics workerMetrics)
+                                         WorkerMetrics workerMetrics, WorkerMetrics.StageTimers partitionedJoinTimers)
     {
         WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
         WorkerMetrics.Timer computeCostTimer = new WorkerMetrics.Timer();
@@ -401,11 +401,14 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
             for (Iterator<String> it = leftParts.iterator(); it.hasNext(); )
             {
                 String leftPartitioned = it.next();
+                // Use stage timers for read timing
+                partitionedJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         leftPartitioned, WorkerCommon.getStorage(leftScheme)))
                 {
                     readCostTimer.stop();
+                    partitionedJoinTimers.getReadTimer().stop();
                     Set<Integer> leftHashValues;
                     if (leftScheme.equals(Storage.Scheme.httpstream))
                     {
@@ -431,6 +434,8 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         PixelsRecordReader recordReader = pixelsReader.read(option);
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
+                        // Use stage timers for compute timing
+                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
@@ -441,6 +446,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                             }
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
+                        partitionedJoinTimers.getComputeTimer().stop();
                         computeCostTimer.minus(recordReader.getReadTimeNanos());
                         readCostTimer.add(recordReader.getReadTimeNanos());
                         readBytes += recordReader.getCompletedBytes();

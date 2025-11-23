@@ -244,7 +244,7 @@ public class PartitionedJoinStreamWorker extends BasePartitionedJoinWorker imple
                     try
                     {
                         buildHashTable(transId, timestamp, joiner, parts, leftColumnsToRead, leftInputStorageInfo.getScheme(),
-                                hashValues, numPartition, workerMetrics);
+                                hashValues, numPartition, workerMetrics, WorkerMetrics.StageTimers.getEmpty());
                     }
                     catch (Throwable e)
                     {
@@ -296,10 +296,10 @@ public class PartitionedJoinStreamWorker extends BasePartitionedJoinWorker imple
                                     joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, parts, rightColumnsToRead,
                                             rightInputStorageInfo.getScheme(), hashValues,
-                                            numPartition, outputPartitionInfo, result, workerMetrics) :
+                                            numPartition, outputPartitionInfo, result, workerMetrics, WorkerMetrics.StageTimers.getEmpty()) :
                                     joinWithRightTable(transId, timestamp, joiner, parts, rightColumnsToRead,
                                             rightInputStorageInfo.getScheme(), hashValues, numPartition,
-                                            result.get(0), workerMetrics);
+                                            result.get(0), workerMetrics, WorkerMetrics.StageTimers.getEmpty());
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during hash join", e);

@@ -58,6 +58,9 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
 {
     private final Logger logger;
     private final WorkerMetrics workerMetrics;
+    
+    // Fine-grained timers for four stages
+    private final WorkerMetrics.StageTimers broadcastChainJoinTimers = new WorkerMetrics.StageTimers();
 
     public BaseBroadcastChainJoinWorker(WorkerContext context)
     {
@@ -137,7 +140,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
 
             // build the joiner.
             Joiner joiner = buildJoiner(transId, timestamp, threadPool, chainTables, chainJoinInfos,
-                    rightTable, lastJoinInfo, workerMetrics);
+                    rightTable, lastJoinInfo, workerMetrics, broadcastChainJoinTimers);
             logger.info("chain hash table size: " + joiner.getSmallTableSize() + ", duration (ns): " +
                     (workerMetrics.getInputCostNs() + workerMetrics.getComputeCostNs()));
 
@@ -167,10 +170,10 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                                     BaseBroadcastJoinWorker.joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
                                             !rightTable.isBase(), rightCols, rightFilter,
-                                            outputPartitionInfo, result, workerMetrics) :
+                                            outputPartitionInfo, result, workerMetrics, broadcastChainJoinTimers) :
                                     BaseBroadcastJoinWorker.joinWithRightTable(transId, timestamp, joiner, inputs,
                                             rightInputStorageInfo.getScheme(), !rightTable.isBase(), rightCols,
-                                            rightFilter, result.get(0), workerMetrics);
+                                            rightFilter, result.get(0), workerMetrics, broadcastChainJoinTimers);
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during broadcast join", e);
@@ -196,6 +199,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
             try
             {
                 PixelsWriter pixelsWriter;
+                broadcastChainJoinTimers.getWriteFileTimer().start();
                 WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
                 if (partitionOutput)
                 {
@@ -211,7 +215,9 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                         {
                             for (VectorizedRowBatch batch : batches)
                             {
+                                broadcastChainJoinTimers.getWriteCacheTimer().start();
                                 pixelsWriter.addRowBatch(batch, hash);
+                                broadcastChainJoinTimers.getWriteCacheTimer().stop();
                             }
                         }
                     }
@@ -224,10 +230,14 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                     ConcurrentLinkedQueue<VectorizedRowBatch> rowBatches = result.get(0);
                     for (VectorizedRowBatch rowBatch : rowBatches)
                     {
+                        broadcastChainJoinTimers.getWriteCacheTimer().start();
                         pixelsWriter.addRowBatch(rowBatch);
+                        broadcastChainJoinTimers.getWriteCacheTimer().stop();
                     }
                 }
                 pixelsWriter.close();
+                long writeCostNs = writeCostTimer.stop();
+                broadcastChainJoinTimers.getWriteFileTimer().stop();
                 joinOutput.addOutput(outputPath, pixelsWriter.getNumRowGroup());
                 if (outputStorageInfo.getScheme() == Storage.Scheme.minio)
                 {
@@ -237,7 +247,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                         TimeUnit.MILLISECONDS.sleep(10);
                     }
                 }
-                workerMetrics.addOutputCostNs(writeCostTimer.stop());
+                workerMetrics.addOutputCostNs(writeCostNs);
                 workerMetrics.addWriteBytes(pixelsWriter.getCompletedBytes());
                 workerMetrics.addNumWriteRequests(pixelsWriter.getNumWriteRequests());
             } catch (Throwable e)
@@ -278,7 +288,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
      */
     private static Joiner buildJoiner(
             long transId, long timestamp, ExecutorService executor, List<BroadcastTableInfo> leftTables, List<ChainJoinInfo> chainJoinInfos,
-            BroadcastTableInfo rightTable, JoinInfo lastJoinInfo, WorkerMetrics workerMetrics)
+            BroadcastTableInfo rightTable, JoinInfo lastJoinInfo, WorkerMetrics workerMetrics, WorkerMetrics.StageTimers broadcastChainJoinTimers)
     {
         try
         {
@@ -286,7 +296,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
             BroadcastTableInfo t1 = leftTables.get(0);
             BroadcastTableInfo t2 = leftTables.get(1);
             Joiner currJoiner = buildFirstJoiner(transId, timestamp, executor, t1, t2, chainJoinInfos.get(0),
-                    workerMetrics);
+                    workerMetrics, broadcastChainJoinTimers);
             for (int i = 1; i < leftTables.size() - 1; ++i)
             {
                 BroadcastTableInfo currRightTable = leftTables.get(i);
@@ -303,7 +313,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                         nextJoinInfo.getSmallProjection(), currJoinInfo.getKeyColumnIds(),
                         nextResultSchema, nextJoinInfo.getLargeColumnAlias(),
                         nextJoinInfo.getLargeProjection(), nextTable.getKeyColumnIds());
-                chainJoin(transId, timestamp, executor, currJoiner, nextJoiner, currRightTable, workerMetrics);
+                chainJoin(transId, timestamp, executor, currJoiner, nextJoiner, currRightTable, workerMetrics, broadcastChainJoinTimers);
                 currJoiner = nextJoiner;
             }
             ChainJoinInfo lastChainJoin = chainJoinInfos.get(chainJoinInfos.size()-1);
@@ -316,7 +326,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                     lastJoinInfo.getSmallProjection(), lastChainJoin.getKeyColumnIds(),
                     rightResultSchema, lastJoinInfo.getLargeColumnAlias(),
                     lastJoinInfo.getLargeProjection(), rightTable.getKeyColumnIds());
-            chainJoin(transId, timestamp, executor, currJoiner, finalJoiner, lastLeftTable, workerMetrics);
+            chainJoin(transId, timestamp, executor, currJoiner, finalJoiner, lastLeftTable, workerMetrics, broadcastChainJoinTimers);
             workerMetrics.addInputCostNs(readCostTimer.getElapsedNs());
             return finalJoiner;
         } catch (Throwable e)
@@ -341,7 +351,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
      */
     protected static Joiner buildFirstJoiner(
             long transId, long timestamp, ExecutorService executor, BroadcastTableInfo t1, BroadcastTableInfo t2,
-            ChainJoinInfo joinInfo, WorkerMetrics workerMetrics)
+            ChainJoinInfo joinInfo, WorkerMetrics workerMetrics, WorkerMetrics.StageTimers broadcastChainJoinTimers)
             throws ExecutionException, InterruptedException
     {
         AtomicReference<TypeDescription> t1Schema = new AtomicReference<>();
@@ -366,7 +376,8 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                 try
                 {
                     BaseBroadcastJoinWorker.buildHashTable(transId, timestamp, (HashJoiner) joiner, inputs, t1.getStorageInfo().getScheme(),
-                            !t1.isBase(), t1.getColumnsToRead(), t1Filter, workerMetrics, null);
+                            !t1.isBase(), t1.getColumnsToRead(), t1Filter, workerMetrics,
+                            broadcastChainJoinTimers);
                 }
                 catch (Throwable e)
                 {
@@ -396,7 +407,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
      * @throws InterruptedException
      */
     protected static void chainJoin(long transId, long timestamp, ExecutorService executor, Joiner currJoiner,
-            Joiner nextJoiner, BroadcastTableInfo currRightTable, WorkerMetrics workerMetrics)
+            Joiner nextJoiner, BroadcastTableInfo currRightTable, WorkerMetrics workerMetrics, WorkerMetrics.StageTimers broadcastChainJoinTimers)
             throws ExecutionException, InterruptedException
     {
         TableScanFilter currRightFilter = JSON.parseObject(currRightTable.getFilter(), TableScanFilter.class);
@@ -409,7 +420,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                 {
                     chainJoinSplit(transId, timestamp, currJoiner, nextJoiner, inputs,
                             currRightTable.getStorageInfo().getScheme(), !currRightTable.isBase(),
-                            currRightTable.getColumnsToRead(), currRightFilter, workerMetrics);
+                            currRightTable.getColumnsToRead(), currRightFilter, workerMetrics, broadcastChainJoinTimers);
                 }
                 catch (Throwable e)
                 {
@@ -445,7 +456,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
     private static void chainJoinSplit(
             long transId, long timestamp, Joiner currJoiner, Joiner nextJoiner, List<InputInfo> rightInputs,
             Storage.Scheme rightScheme, boolean checkExistence, String[] rightCols,
-            TableScanFilter rightFilter, WorkerMetrics workerMetrics)
+            TableScanFilter rightFilter, WorkerMetrics workerMetrics, WorkerMetrics.StageTimers broadcastChainJoinTimers)
     {
         WorkerMetrics.Timer readCostTimer = new WorkerMetrics.Timer();
         WorkerMetrics.Timer computeCostTimer = new WorkerMetrics.Timer();
@@ -456,11 +467,14 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
             for (Iterator<InputInfo> it = rightInputs.iterator(); it.hasNext(); )
             {
                 InputInfo input = it.next();
+                // Sync read timer with stage timers
+                broadcastChainJoinTimers.getReadTimer().start();
                 readCostTimer.start();
                 try (PixelsReader pixelsReader = WorkerCommon.getReader(
                         input.getPath(), WorkerCommon.getStorage(rightScheme)))
                 {
                     readCostTimer.stop();
+                    broadcastChainJoinTimers.getReadTimer().stop();
                     if (input.getRgStart() >= pixelsReader.getRowGroupNum())
                     {
                         it.remove();
@@ -477,6 +491,8 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
 
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
+                    // Sync compute timer with stage timers
+                    broadcastChainJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
@@ -496,6 +512,7 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
                         }
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
+                    broadcastChainJoinTimers.getComputeTimer().stop();
                     computeCostTimer.minus(recordReader.getReadTimeNanos());
                     readCostTimer.add(recordReader.getReadTimeNanos());
                     readBytes += recordReader.getCompletedBytes();
@@ -529,8 +546,8 @@ public class BaseBroadcastChainJoinWorker extends Worker<BroadcastChainJoinInput
     }
 
     private void writePerformanceToFile() {
-        WorkerMetrics.PerformanceMetricsWriter.writeBasicPerformanceToFile(
-                workerMetrics, logger, "BroadcastChainJoinWorker",
+        WorkerMetrics.PerformanceMetricsWriter.writePerformanceToFile(
+                workerMetrics, broadcastChainJoinTimers, logger, "BroadcastChainJoinWorker",
                 "/tmp/broadcast_chain_join_performance_metrics.csv");
     }
 }

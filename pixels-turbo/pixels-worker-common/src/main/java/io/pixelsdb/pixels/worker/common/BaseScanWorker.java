@@ -288,11 +288,12 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                 }
                 if (pixelsWriter == null && !partialAggregate)
                 {
-                    writeCostTimer.start();
+                    // Writer initialization is part of WRITE_CACHE stage
+                    scanTimers.getWriteCacheTimer().start();
                     outputPath = outputPaths.poll();
                     pixelsWriter = WorkerCommon.getWriter(scanner.getOutputSchema(), WorkerCommon.getStorage(outputScheme),
                             outputPath, encoding, false, null);
-                    writeCostTimer.stop();
+                    scanTimers.getWriteCacheTimer().stop();
                 }
 
                 computeCostTimer.start();

@@ -72,6 +72,11 @@ public class WorkerMetrics
      * WRITE_CACHE, WRITE_FILE
      */
     public static class StageTimers {
+        private static final StageTimers EMPTY = new StageTimers();
+
+        public static StageTimers getEmpty() {
+            return EMPTY;
+        }
         private final Timer readTimer = new Timer();
         private final Timer computeTimer = new Timer();
         private final Timer writeCacheTimer = new Timer();
@@ -218,7 +223,8 @@ public class WorkerMetrics
 
         public static void writeBasicPerformanceToFile(WorkerMetrics workerMetrics, Logger logger,
                 String workerType, String csvFilePath) {
-            writePerformanceToFileWithFallback(workerMetrics, null, logger, workerType, csvFilePath, true);
+            writePerformanceToFileWithFallback(workerMetrics, StageTimers.getEmpty(), logger, workerType, csvFilePath,
+                    true);
         }
 
         private static void writePerformanceToFileWithFallback(WorkerMetrics workerMetrics, StageTimers stageTimers,
@@ -231,7 +237,7 @@ public class WorkerMetrics
             long outputTimeMs = workerMetrics.getOutputCostNs() / 1_000_000;
 
             long computeTimeMsNew, writeCacheTimeMs, writeFileTimeMs;
-            boolean hasDetailedTiming = stageTimers != null && !useBasicMetricsOnly;
+            boolean hasDetailedTiming = stageTimers != StageTimers.getEmpty() && !useBasicMetricsOnly;
 
             if (hasDetailedTiming) {
                 // Use detailed stage timers
@@ -257,13 +263,14 @@ public class WorkerMetrics
             if (hasDetailedTiming) {
                 logger.info("Four-Stage Performance Metrics (ms): READ={}, COMPUTE={}, WRITE_CACHE={}, WRITE_FILE={}",
                         readTimeMs, computeTimeMsNew, writeCacheTimeMs, writeFileTimeMs);
-                logger.info("Percentages: COMPUTE={:.2f}%, WRITE_CACHE={:.2f}%, WRITE_FILE={:.2f}%, S3 Storage={:.2f}%",
-                        computePct, writeCachePct, writeFilePct, s3StoragePct);
+                logger.info("Percentages: COMPUTE={}%, WRITE_CACHE={}%, WRITE_FILE={}%, S3 Storage={}%",
+                        String.format("%.2f", computePct), String.format("%.2f", writeCachePct),
+                        String.format("%.2f", writeFilePct), String.format("%.2f", s3StoragePct));
             } else {
                 logger.info("Basic Performance Metrics (ms): READ={}, COMPUTE={}, OUTPUT={}",
                         readTimeMs, computeTimeMs, outputTimeMs);
-                logger.info("Total Time: {} ms, Read Percentage: {:.2f}%", totalTimeMs,
-                        totalTimeMs > 0 ? (readTimeMs * 100.0 / totalTimeMs) : 0);
+                logger.info("Total Time: {} ms, Read Percentage: {}%", totalTimeMs,
+                        String.format("%.2f", totalTimeMs > 0 ? (readTimeMs * 100.0 / totalTimeMs) : 0));
             }
 
             // Write to CSV file

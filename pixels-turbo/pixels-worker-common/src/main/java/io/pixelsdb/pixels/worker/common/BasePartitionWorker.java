@@ -146,7 +146,6 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 throw new WorkerException("error occurred threads, please check the stacktrace before this log record");
             }
 
-            partitionTimers.getWriteFileTimer().start();
             WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
             if (writerSchema.get() == null)
             {
@@ -155,9 +154,12 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 TypeDescription resultSchema = WorkerCommon.getResultSchema(fileSchema, columnsToRead);
                 writerSchema.set(resultSchema);
             }
+            // Writer initialization is part of WRITE_CACHE stage
+            partitionTimers.getWriteCacheTimer().start();
             PixelsWriter pixelsWriter = WorkerCommon.getWriter(writerSchema.get(),
                     WorkerCommon.getStorage(outputStorageInfo.getScheme()), outputPath, encoding,
                     true, Arrays.stream(keyColumnIds).boxed().collect(Collectors.toList()));
+            partitionTimers.getWriteCacheTimer().stop();
             Set<Integer> hashValues = new HashSet<>(numPartition);
 
             for (int hash = 0; hash < numPartition; ++hash)
@@ -177,6 +179,8 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             partitionOutput.addOutput(outputPath);
             partitionOutput.setHashValues(hashValues);
 
+            // S3 persistence (close) is part of WRITE_FILE stage
+            partitionTimers.getWriteFileTimer().start();
             pixelsWriter.close();
             writeCostTimer.stop();
             partitionTimers.getWriteFileTimer().stop();

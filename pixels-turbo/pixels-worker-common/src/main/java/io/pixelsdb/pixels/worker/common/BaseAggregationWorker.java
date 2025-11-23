@@ -198,14 +198,16 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                 throw new WorkerException("error occurred threads, please check the stacktrace before this log record");
             }
 
-            aggregationTimers.getWriteFileTimer().start();
             WorkerMetrics.Timer writeCostTimer = new WorkerMetrics.Timer().start();
+            // Writer initialization is part of WRITE_CACHE stage
+            aggregationTimers.getWriteCacheTimer().start();
             PixelsWriter pixelsWriter = WorkerCommon.getWriter(aggregator.getOutputSchema(),
                     WorkerCommon.getStorage(outputStorageInfo.getScheme()),
                     outputPath, encoding, false, null);
-            aggregationTimers.getWriteCacheTimer().start();
             aggregator.writeAggrOutput(pixelsWriter);
             aggregationTimers.getWriteCacheTimer().stop();
+            // S3 persistence (close) is part of WRITE_FILE stage
+            aggregationTimers.getWriteFileTimer().start();
             pixelsWriter.close();
             if (outputStorageInfo.getScheme() == Storage.Scheme.minio)
             {
@@ -329,6 +331,8 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                             PixelsRecordReader recordReader = pixelsReader.read(option);
                             VectorizedRowBatch rowBatch;
 
+                            // Sync compute timer with stage timers
+                            aggregationTimers.getComputeTimer().start();
                             computeCostTimer.start();
                             do
                             {
@@ -340,6 +344,7 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                                 }
                             } while (!rowBatch.endOfFile);
                             computeCostTimer.stop();
+                            aggregationTimers.getComputeTimer().stop();
                             computeCostTimer.minus(recordReader.getReadTimeNanos());
                             readCostTimer.add(recordReader.getReadTimeNanos());
                             readBytes += recordReader.getCompletedBytes();

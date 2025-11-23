@@ -258,9 +258,11 @@ public class BroadcastJoinStreamWorker extends BaseBroadcastJoinWorker implement
                                     joinWithRightTableAndPartition(
                                             transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
                                             !rightTable.isBase(), rightColumnsToRead, rightFilter,
-                                            outputPartitionInfo, result, workerMetrics) :
+                                            outputPartitionInfo, result, workerMetrics, broadcastJoinTimers)
+                                    :
                                     joinWithRightTable(transId, timestamp, joiner, inputs, rightInputStorageInfo.getScheme(),
-                                            !rightTable.isBase(), rightColumnsToRead, rightFilter, result.get(0), workerMetrics);
+                                            !rightTable.isBase(), rightColumnsToRead, rightFilter, result.get(0),
+                                            workerMetrics, broadcastJoinTimers);
                         } catch (Throwable e)
                         {
                             throw new WorkerException("error during broadcast join", e);
