@@ -518,8 +518,20 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
                 throw new IOException("Failed to get file id for file " + physicalReader.getPathUri(), e);
             } catch (RetinaException e)
             {
-                logger.error("Failed to query visibility bitmap for file " + physicalReader.getPathUri(), e);
-                throw new IOException("Failed to query visibility bitmap for file " + physicalReader.getPathUri(), e);
+                // If RetinaService is disabled or not available, log a warning and continue without visibility filtering
+                // This allows the system to work in environments where RetinaService is not available (e.g., AWS Lambda)
+                if (e.getMessage() != null && e.getMessage().contains("disabled or not available"))
+                {
+                    logger.warn("RetinaService is disabled or not available. Skipping visibility query for file " + 
+                            physicalReader.getPathUri() + ". All rows will be considered visible.");
+                    // Set visibility bitmaps to null, which means all rows are visible
+                    rgVisibilityBitmaps = null;
+                }
+                else
+                {
+                    logger.error("Failed to query visibility bitmap for file " + physicalReader.getPathUri(), e);
+                    throw new IOException("Failed to query visibility bitmap for file " + physicalReader.getPathUri(), e);
+                }
             }
         }
 
@@ -1131,8 +1143,11 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
                 int addedRows = 0;
                 for (int i = 0; i < curBatchSize; i++)
                 {
-                    if ((hiddenTimestampVector == null || hiddenTimestampVector.vector[i] <= this.transTimestamp)
-                        && (!checkBit(rgVisibilityBitmaps[curRGIdx], curRowInRG + i)))
+                    // Check timestamp constraint
+                    boolean timestampValid = (hiddenTimestampVector == null || hiddenTimestampVector.vector[i] <= this.transTimestamp);
+                    // Check visibility constraint (skip if rgVisibilityBitmaps is null, meaning RetinaService is disabled)
+                    boolean visibilityValid = (rgVisibilityBitmaps == null || !checkBit(rgVisibilityBitmaps[curRGIdx], curRowInRG + i));
+                    if (timestampValid && visibilityValid)
                     {
                         selectedRows.set(i);
                         addedRows++;

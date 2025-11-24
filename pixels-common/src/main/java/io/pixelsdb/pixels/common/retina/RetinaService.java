@@ -46,26 +46,47 @@ public class RetinaService
     private static final Logger logger = LogManager.getLogger(RetinaService.class);
     private static final RetinaService defaultInstance;
     private static final Map<HostAddress, RetinaService> otherInstances = new ConcurrentHashMap<>();
+    private static final RetinaService disabledInstance = new RetinaService(true);
 
     static
     {
-        String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
-        int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
-        defaultInstance = new RetinaService(retinaHost, retinaPort);
-        ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+        RetinaService service;
+        String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
+        if ("true".equalsIgnoreCase(retinaEnabled))
+        {
             try
             {
-                defaultInstance.shutdown();
-                for (RetinaService otherRetinaService : otherInstances.values())
-                {
-                    otherRetinaService.shutdown();
-                }
-                otherInstances.clear();
-            } catch (InterruptedException e)
-            {
-                logger.error("failed to shut down retina service", e);
+                String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
+                int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
+                service = new RetinaService(retinaHost, retinaPort);
+                RetinaService finalService = service;
+                ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+                    try
+                    {
+                        finalService.shutdown();
+                        for (RetinaService otherRetinaService : otherInstances.values())
+                        {
+                            otherRetinaService.shutdown();
+                        }
+                        otherInstances.clear();
+                    } catch (InterruptedException e)
+                    {
+                        logger.error("failed to shut down retina service", e);
+                    }
+                });
             }
-        });
+            catch (Exception e)
+            {
+                logger.warn("Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.", e);
+                service = disabledInstance;
+            }
+        }
+        else
+        {
+            logger.info("RetinaService is disabled by configuration (retina.enabled=false)");
+            service = disabledInstance;
+        }
+        defaultInstance = service;
     }
 
     /**
@@ -115,9 +136,21 @@ public class RetinaService
         this.isShutdown = false;
     }
 
+    /**
+     * Protected constructor for creating a disabled RetinaService instance.
+     * This is used when RetinaService is disabled via configuration or fails to initialize.
+     */
+    protected RetinaService(boolean isDisabled)
+    {
+        this.channel = null;
+        this.stub = null;
+        this.asyncStub = null;
+        this.isShutdown = true;
+    }
+
     private synchronized void shutdown() throws InterruptedException
     {
-        if (!this.isShutdown)
+        if (!this.isShutdown && this.channel != null)
         {
             // Wait for at most 5 seconds, this should be enough to shut down an RPC client.
             this.channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);

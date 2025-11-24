@@ -14,7 +14,7 @@
         "inputInfos": [
           {
             "inputId": 1,
-            "path": "s3://home-sunhao/test-data/example.pxl",
+            "path": "s3://home-sunhao/test-data/large_test_data.pxl",
             "rgStart": 0,
             "rgLength": -1,
             "storageInfo": {
