@@ -51,26 +51,47 @@ public class MetadataService
     private static final Logger logger = LogManager.getLogger(MetadataService.class);
     private static final MetadataService defaultInstance;
     private static final Map<HostAddress, MetadataService> otherInstances = new ConcurrentHashMap<>();
+    private static final MetadataService disabledInstance = new MetadataService(true);
 
     static
     {
-        String metadataHost = ConfigFactory.Instance().getProperty("metadata.server.host");
-        int metadataPort = Integer.parseInt(ConfigFactory.Instance().getProperty("metadata.server.port"));
-        defaultInstance = new MetadataService(metadataHost, metadataPort);
-        ShutdownHookManager.Instance().registerShutdownHook(MetadataService.class, false, () -> {
+        MetadataService service;
+        String metadataEnabled = ConfigFactory.Instance().getProperty("metadata.enabled");
+        if ("true".equalsIgnoreCase(metadataEnabled))
+        {
             try
             {
-                defaultInstance.shutdown();
-                for (MetadataService otherMetadataService : otherInstances.values())
-                {
-                    otherMetadataService.shutdown();
-                }
-                otherInstances.clear();
-            } catch (InterruptedException e)
-            {
-                logger.error("failed to shut down metadata service", e);
+                String metadataHost = ConfigFactory.Instance().getProperty("metadata.server.host");
+                int metadataPort = Integer.parseInt(ConfigFactory.Instance().getProperty("metadata.server.port"));
+                service = new MetadataService(metadataHost, metadataPort);
+                MetadataService finalService = service;
+                ShutdownHookManager.Instance().registerShutdownHook(MetadataService.class, false, () -> {
+                    try
+                    {
+                        finalService.shutdown();
+                        for (MetadataService otherMetadataService : otherInstances.values())
+                        {
+                            otherMetadataService.shutdown();
+                        }
+                        otherInstances.clear();
+                    } catch (InterruptedException e)
+                    {
+                        logger.error("failed to shut down metadata service", e);
+                    }
+                });
             }
-        });
+            catch (Exception e)
+            {
+                logger.warn("Failed to initialize MetadataService: " + e.getMessage() + ". MetadataService will be disabled.", e);
+                service = disabledInstance;
+            }
+        }
+        else
+        {
+            logger.info("MetadataService is disabled by configuration (metadata.enabled=false)");
+            service = disabledInstance;
+        }
+        defaultInstance = service;
     }
 
     /**
@@ -117,9 +138,20 @@ public class MetadataService
         this.isShutDown = false;
     }
 
+    /**
+     * Protected constructor for creating a disabled MetadataService instance.
+     * This is used when MetadataService is disabled via configuration or fails to initialize.
+     */
+    protected MetadataService(boolean isDisabled)
+    {
+        this.channel = null;
+        this.stub = null;
+        this.isShutDown = true;
+    }
+
     private synchronized void shutdown() throws InterruptedException
     {
-        if (!this.isShutDown)
+        if (!this.isShutDown && this.channel != null)
         {
             // Wait for at most 5 seconds, this should be enough to shut down an RPC client.
             this.channel.shutdown().awaitTermination(5, TimeUnit.SECONDS);
@@ -1344,6 +1376,10 @@ public class MetadataService
      */
     public long getFileId(String filePathUri) throws MetadataException
     {
+        if (this.stub == null)
+        {
+            throw new MetadataException("MetadataService is disabled or not available");
+        }
         String token = UUID.randomUUID().toString();
         MetadataProto.GetFileIdRequest request = MetadataProto.GetFileIdRequest.newBuilder()
                 .setHeader(MetadataProto.RequestHeader.newBuilder().setToken(token))

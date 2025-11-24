@@ -514,8 +514,20 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
                 throw new IOException("Failed to get path uri");
             } catch (MetadataException e)
             {
-                logger.error("Failed to get file id for file " + physicalReader.getPathUri(), e);
-                throw new IOException("Failed to get file id for file " + physicalReader.getPathUri(), e);
+                // If MetadataService is disabled or not available, log a warning and continue without file id
+                // This allows the system to work in environments where MetadataService is not available (e.g., AWS Lambda)
+                if (e.getMessage() != null && e.getMessage().contains("disabled or not available"))
+                {
+                    logger.warn("MetadataService is disabled or not available. Skipping file id query for file " + 
+                            physicalReader.getPathUri() + ". Visibility filtering will be skipped.");
+                    // Set visibility bitmaps to null, which means all rows are visible
+                    rgVisibilityBitmaps = null;
+                }
+                else
+                {
+                    logger.error("Failed to get file id for file " + physicalReader.getPathUri(), e);
+                    throw new IOException("Failed to get file id for file " + physicalReader.getPathUri(), e);
+                }
             } catch (RetinaException e)
             {
                 logger.error("Failed to query visibility bitmap for file " + physicalReader.getPathUri(), e);
