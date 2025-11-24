@@ -1,0 +1,42 @@
+{
+  "transId": 12345,
+  "timestamp": 1640995200000,
+  "tableInfo": {
+    "tableName": "test_table",
+    "base": true,
+    "columnsToRead": ["col1", "col2", "col3"],
+    "storageInfo": {
+      "scheme": "s3",
+      "endpoint": "https://s3.us-east-2.amazonaws.com"
+    },
+    "inputSplits": [
+      {
+        "inputInfos": [
+          {
+            "inputId": 1,
+            "path": "s3://home-sunhao/test-data/example.pxl",
+            "rgStart": 0,
+            "rgLength": -1,
+            "storageInfo": {
+              "scheme": "s3",
+              "endpoint": "https://s3.us-east-2.amazonaws.com"
+            }
+          }
+        ]
+      }
+    ],
+    "filter": null
+  },
+  "scanProjection": [true, true, true],
+  "partialAggregationPresent": false,
+  "partialAggregationInfo": null,
+  "output": {
+    "path": "s3://home-sunhao/output/",
+    "fileNames": ["result.pxl"],
+    "storageInfo": {
+      "scheme": "s3",
+      "endpoint": "https://s3.us-east-2.amazonaws.com"
+    },
+    "encoding": true
+  }
+}
