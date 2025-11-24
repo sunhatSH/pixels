@@ -110,17 +110,7 @@
                                 </includes>
                             </artifactSet>
                             <filters>
-                                <filter>
-                                    <artifact>io.pixelsdb:pixels-common</artifact>
-                                    <excludes>
-                                        <!-- Exclude daemon implementation classes but keep gRPC stubs -->
-                                        <exclude>io/pixelsdb/pixels/daemon/metadata/MetadataServer*.class</exclude>
-                                        <exclude>io/pixelsdb/pixels/daemon/transaction/TransServer*.class</exclude>
-                                        <exclude>io/pixelsdb/pixels/daemon/retina/RetinaServer*.class</exclude>
-                                        <exclude>io/pixelsdb/pixels/daemon/cache/CacheServer*.class</exclude>
-                                        <exclude>io/pixelsdb/pixels/daemon/DaemonMain.class</exclude>
-                                    </excludes>
-                                </filter>
+                                <!-- No exclusions - include all classes including daemon gRPC stubs -->
                             </filters>
                             <finalName>pixels-worker-lambda</finalName>
                             <transformers>
