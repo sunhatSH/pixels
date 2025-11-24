@@ -113,8 +113,12 @@
                                 <filter>
                                     <artifact>io.pixelsdb:pixels-common</artifact>
                                     <excludes>
-                                        <!-- we do not need the protobuf generated classes for daemon -->
-                                        <exclude>io/pixelsdb/pixels/daemon/**</exclude>
+                                        <!-- Exclude daemon implementation classes but keep gRPC stubs -->
+                                        <exclude>io/pixelsdb/pixels/daemon/metadata/MetadataServer*.class</exclude>
+                                        <exclude>io/pixelsdb/pixels/daemon/transaction/TransServer*.class</exclude>
+                                        <exclude>io/pixelsdb/pixels/daemon/retina/RetinaServer*.class</exclude>
+                                        <exclude>io/pixelsdb/pixels/daemon/cache/CacheServer*.class</exclude>
+                                        <exclude>io/pixelsdb/pixels/daemon/DaemonMain.class</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
