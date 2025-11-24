@@ -90,11 +90,14 @@
             <artifactId>grpc-context</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- grpc-netty removed to avoid conflict with grpc-netty-shaded in Lambda environment -->
+        <!--
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty</artifactId>
             <optional>true</optional>
         </dependency>
+        -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-grpclb</artifactId>
