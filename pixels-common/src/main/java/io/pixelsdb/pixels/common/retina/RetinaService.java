@@ -147,14 +147,25 @@ public class RetinaService
     {
         assert (host != null);
         assert (port > 0 && port <= 65535);
-        this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
+        try
+        {
+            this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
 //                .keepAliveTime(1, TimeUnit.SECONDS)
 //                .keepAliveTimeout(3, TimeUnit.SECONDS)
 //                .keepAliveWithoutCalls(true)
                 .build();
-        this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
-        this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
-        this.isShutdown = false;
+            this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
+            this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
+            this.isShutdown = false;
+        }
+        catch (IllegalArgumentException | RuntimeException e)
+        {
+            // In environments like AWS Lambda, gRPC channel creation may fail due to unsupported transport types
+            // Wrap the exception and rethrow it so it can be caught by the static initializer
+            throw new RuntimeException("Failed to create gRPC channel for RetinaService: " + 
+                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
+                    ". This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
+        }
     }
 
     /**
