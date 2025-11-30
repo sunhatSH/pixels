@@ -308,34 +308,39 @@ remote_build() {
         git pull origin $BRANCH
         
         echo "--- Building project ---"
-        if ! mvn clean package -DskipTests -pl pixels-turbo/pixels-worker-lambda -am; then
+        BUILD_SUCCESS=false
+        if mvn clean package -DskipTests -pl pixels-turbo/pixels-worker-lambda -am; then
+            BUILD_SUCCESS=true
+            echo "✅ Build successful"
+        else
             echo "⚠️  WARNING: Build failed, checking for existing JAR files..."
-            cd pixels-turbo/pixels-worker-lambda/target
-            
-            # Look for any existing JAR files
-            EXISTING_JAR=\$(ls -t pixels-worker-lambda*.jar 2>/dev/null | head -1)
-            if [ -n "\$EXISTING_JAR" ]; then
-                echo "Found existing JAR: \$EXISTING_JAR"
-                echo "⚠️  WARNING: Using existing JAR file from previous build"
-                # Only copy if it's a different file
-                if [ "\$EXISTING_JAR" != "pixels-worker-lambda.jar" ]; then
-                    cp "\$EXISTING_JAR" pixels-worker-lambda.jar || {
-                        echo "❌ ERROR: Failed to copy existing JAR"
-                        exit 1
-                    }
-                else
-                    echo "JAR file already named correctly: pixels-worker-lambda.jar"
+            # Check in target directory (may have been cleaned, but check anyway)
+            if [ -d "pixels-turbo/pixels-worker-lambda/target" ]; then
+                cd pixels-turbo/pixels-worker-lambda/target
+                EXISTING_JAR=\$(ls -t pixels-worker-lambda*.jar 2>/dev/null | head -1)
+                if [ -n "\$EXISTING_JAR" ] && [ -f "\$EXISTING_JAR" ]; then
+                    echo "Found existing JAR in target: \$EXISTING_JAR"
+                    echo "⚠️  WARNING: Using existing JAR file from previous build"
+                    if [ "\$EXISTING_JAR" != "pixels-worker-lambda.jar" ]; then
+                        cp "\$EXISTING_JAR" pixels-worker-lambda.jar
+                    fi
+                    BUILD_SUCCESS=true
+                    cd ~/pixels
                 fi
-            else
-                echo "❌ ERROR: Build failed and no existing JAR found"
+            fi
+            
+            # If still no JAR found, try looking in parent directories or use older builds
+            if [ "\$BUILD_SUCCESS" != "true" ]; then
+                echo "❌ ERROR: Build failed and no usable JAR found"
+                echo "   Please either:"
+                echo "   1. Fix the build environment (GLIBC++ version issue)"
+                echo "   2. Manually upload a JAR file to EC2"
                 exit 1
             fi
-        else
-            echo "✅ Build successful"
         fi
         
         echo "--- Preparing JAR file ---"
-        cd pixels-turbo/pixels-worker-lambda/target
+        cd ~/pixels/pixels-turbo/pixels-worker-lambda/target
         
         # Check if deps JAR exists and merge if needed
         if [ -f "pixels-worker-lambda-deps.jar" ] && [ -f "pixels-worker-lambda.jar" ]; then
