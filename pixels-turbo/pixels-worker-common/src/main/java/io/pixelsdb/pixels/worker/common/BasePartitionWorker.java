@@ -106,7 +106,7 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 outputFolder += "/";
             }
             // Combine path and fileNames to get the full output path
-            String outputPath = outputFolder + event.getOutput().getFileNames().get(0);
+            String outputPath = outputFolder + event.getOutput().getPath();
             logger.info("PartitionWorker output path: " + outputPath);
             boolean encoding = event.getOutput().isEncoding();
 
