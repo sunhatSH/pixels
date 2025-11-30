@@ -10,7 +10,8 @@ set -o pipefail  # Exit if any command in a pipeline fails
 # ========================================
 # Configuration
 # ========================================
-REPO_USER="sunhaoSH"
+# Default values - will be verified and adjusted in git_sync function
+REPO_USER="sunhaoSH"  # Will try this first, fallback to detected username if not accessible
 REPO_NAME="pixels"
 BRANCH="master"
 SSH_KEY="$HOME/.ssh/pixels-key.pem"
@@ -92,6 +93,35 @@ preflight_checks() {
 # ========================================
 git_sync() {
     log_step "1" "Git Code Sync"
+    
+    # Auto-detect GitHub username and verify repository access
+    log_info "Detecting GitHub username..."
+    SSH_OUTPUT=$(ssh -T git@github.com 2>&1 || true)
+    if echo "$SSH_OUTPUT" | grep -q "successfully authenticated"; then
+        GITHUB_USER=$(echo "$SSH_OUTPUT" | sed -n 's/.*Hi \([^!]*\)!.*/\1/p' || echo "")
+    else
+        GITHUB_USER=""
+    fi
+    
+    # Try requested username first, fallback to detected username if not accessible
+    VERIFIED_USER="$REPO_USER"
+    if ! git ls-remote "git@github.com:${REPO_USER}/${REPO_NAME}.git" >/dev/null 2>&1; then
+        if [ -n "$GITHUB_USER" ] && git ls-remote "git@github.com:${GITHUB_USER}/${REPO_NAME}.git" >/dev/null 2>&1; then
+            log_warning "Repository git@github.com:${REPO_USER}/${REPO_NAME}.git not accessible"
+            log_info "Using detected username: $GITHUB_USER"
+            VERIFIED_USER="$GITHUB_USER"
+            REPO_USER="$GITHUB_USER"
+        else
+            log_error "Cannot access repository git@github.com:${REPO_USER}/${REPO_NAME}.git"
+            if [ -n "$GITHUB_USER" ]; then
+                log_error "Also tried git@github.com:${GITHUB_USER}/${REPO_NAME}.git - not accessible"
+            fi
+            log_error "Please check if the repository exists and you have access rights"
+            exit 1
+        fi
+    fi
+    
+    log_info "Using repository: git@github.com:${REPO_USER}/${REPO_NAME}.git"
     
     # Check and fix Git remote URL
     CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
