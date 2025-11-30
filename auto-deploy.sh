@@ -308,7 +308,26 @@ remote_build() {
         git pull origin $BRANCH
         
         echo "--- Building project ---"
-        mvn clean package -DskipTests -pl pixels-turbo/pixels-worker-lambda -am
+        if ! mvn clean package -DskipTests -pl pixels-turbo/pixels-worker-lambda -am; then
+            echo "⚠️  WARNING: Build failed, checking for existing JAR files..."
+            cd pixels-turbo/pixels-worker-lambda/target
+            
+            # Look for any existing JAR files
+            EXISTING_JAR=\$(ls -t pixels-worker-lambda*.jar 2>/dev/null | head -1)
+            if [ -n "\$EXISTING_JAR" ]; then
+                echo "Found existing JAR: \$EXISTING_JAR"
+                echo "⚠️  WARNING: Using existing JAR file from previous build"
+                cp "\$EXISTING_JAR" pixels-worker-lambda.jar || {
+                    echo "❌ ERROR: Failed to copy existing JAR"
+                    exit 1
+                }
+            else
+                echo "❌ ERROR: Build failed and no existing JAR found"
+                exit 1
+            fi
+        else
+            echo "✅ Build successful"
+        fi
         
         echo "--- Preparing JAR file ---"
         cd pixels-turbo/pixels-worker-lambda/target
