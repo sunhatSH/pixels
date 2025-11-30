@@ -51,69 +51,33 @@ public class RetinaService
     static
     {
         RetinaService service;
-        try
-        {
-            String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
-            if ("true".equalsIgnoreCase(retinaEnabled))
-            {
-                try
-                {
-                    String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
-                    int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
-                    try
-                    {
-                        service = new RetinaService(retinaHost, retinaPort);
-                        RetinaService finalService = service;
-                        ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
-                            try
-                            {
-                                finalService.shutdown();
-                                for (RetinaService otherRetinaService : otherInstances.values())
-                                {
-                                    otherRetinaService.shutdown();
-                                }
-                                otherInstances.clear();
-                            } catch (InterruptedException e)
-                            {
-                                logger.error("failed to shut down retina service", e);
-                            }
-                        });
+        String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
+        if ("true".equalsIgnoreCase(retinaEnabled)) {
+            try {
+                String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
+                int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
+                service = new RetinaService(retinaHost, retinaPort);
+                RetinaService finalService = service;
+                ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+                    try {
+                        finalService.shutdown();
+                        for (RetinaService otherRetinaService : otherInstances.values()) {
+                            otherRetinaService.shutdown();
+                        }
+                        otherInstances.clear();
+                    } catch (InterruptedException e) {
+                        logger.error("failed to shut down retina service", e);
                     }
-                    catch (IllegalArgumentException e)
-                    {
-                        // Catch gRPC channel creation failures (e.g., "NameResolver 'unix' not supported by transport" in Lambda)
-                        logger.warn("Failed to create RetinaService instance due to IllegalArgumentException: " + 
-                                (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
-                                ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
-                        service = disabledInstance;
-                    }
-                    catch (RuntimeException e)
-                    {
-                        // Catch other runtime exceptions from constructor (e.g., wrapped exceptions)
-                        logger.warn("Failed to create RetinaService instance due to RuntimeException: " + 
-                                (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
-                                ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
-                        service = disabledInstance;
-                    }
-                }
-                catch (Exception e)
-                {
-                    logger.warn("Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.", e);
-                    service = disabledInstance;
-                }
+                });
             }
-            else
-            {
-                logger.info("RetinaService is disabled by configuration (retina.enabled=false or not set)");
+            catch (Exception e) {
+                logger.warn(
+                        "Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.",
+                        e);
                 service = disabledInstance;
             }
-        }
-        catch (ExceptionInInitializerError | NoClassDefFoundError | Exception e)
-        {
-            // Catch all exceptions during static initialization, including configuration reading errors
-            logger.warn("Failed to initialize RetinaService during static initialization: " + 
-                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
-                    ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
+        } else {
+            logger.info("RetinaService is disabled by configuration (retina.enabled=false)");
             service = disabledInstance;
         }
         defaultInstance = service;
@@ -128,17 +92,7 @@ public class RetinaService
      */
     public static RetinaService Instance()
     {
-        try
-        {
-            return defaultInstance;
-        }
-        catch (ExceptionInInitializerError | NoClassDefFoundError e)
-        {
-            // If static initialization failed, return disabled instance
-            logger.warn("RetinaService static initialization failed, returning disabled instance: " + 
-                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
-            return disabledInstance;
-        }
+        return defaultInstance;
     }
 
     /**
@@ -166,29 +120,14 @@ public class RetinaService
     {
         assert (host != null);
         assert (port > 0 && port <= 65535);
-        try
-        {
-            this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
+        this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
 //                .keepAliveTime(1, TimeUnit.SECONDS)
 //                .keepAliveTimeout(3, TimeUnit.SECONDS)
 //                .keepAliveWithoutCalls(true)
                 .build();
-            this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
-            this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
-            this.isShutdown = false;
-        }
-        catch (IllegalArgumentException e)
-        {
-            // In environments like AWS Lambda, gRPC channel creation may fail due to unsupported transport types
-            // (e.g., "NameResolver 'unix' not supported by transport")
-            // Re-throw as-is so it can be caught by the static initializer
-            throw e;
-        }
-        catch (RuntimeException e)
-        {
-            // Re-throw other runtime exceptions as-is
-            throw e;
-        }
+        this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
+        this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
+        this.isShutdown = false;
     }
 
     /**

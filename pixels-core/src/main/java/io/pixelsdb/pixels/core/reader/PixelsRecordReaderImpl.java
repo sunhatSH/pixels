@@ -57,7 +57,7 @@ import java.util.concurrent.CompletableFuture;
 public class PixelsRecordReaderImpl implements PixelsRecordReader
 {
     private static final Logger logger = LogManager.getLogger(PixelsRecordReaderImpl.class);
-    private RetinaService retinaService = null; // Lazy initialization with error handling
+    private final RetinaService retinaService = RetinaService.Instance();
 
     private final PhysicalReader physicalReader;
     private final PixelsProto.PostScript postScript;
@@ -505,39 +505,9 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
         {
             try
             {
-                // Lazy initialize RetinaService with error handling
-                if (retinaService == null)
-                {
-                    try
-                    {
-                        retinaService = RetinaService.Instance();
-                    }
-                    catch (ExceptionInInitializerError | NoClassDefFoundError e)
-                    {
-                        logger.warn("Failed to initialize RetinaService: " + e.getMessage() + 
-                                ". RetinaService will be disabled. All rows will be considered visible.", e);
-                        retinaService = null;
-                    }
-                    catch (Exception e)
-                    {
-                        logger.warn("Failed to initialize RetinaService: " + e.getMessage() + 
-                                ". RetinaService will be disabled. All rows will be considered visible.", e);
-                        retinaService = null;
-                    }
-                }
-                
-                if (retinaService != null)
-                {
-                    MetadataService metadataService = MetadataService.Instance();
-                    long fileId = metadataService.getFileId(physicalReader.getPathUri());
-                    rgVisibilityBitmaps = retinaService.queryVisibility(fileId, targetRGs, option.getTransTimestamp());
-                }
-                else
-                {
-                    // RetinaService is not available, all rows are visible
-                    logger.debug("RetinaService is not available, skipping visibility query. All rows will be considered visible.");
-                    rgVisibilityBitmaps = null;
-                }
+                MetadataService metadataService = MetadataService.Instance();
+                long fileId = metadataService.getFileId(physicalReader.getPathUri());
+                rgVisibilityBitmaps = retinaService.queryVisibility(fileId, targetRGs, option.getTransTimestamp());
             } catch (IOException e)
             {
                 logger.error("Failed to get path uri");
