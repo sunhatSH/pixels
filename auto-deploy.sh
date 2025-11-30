@@ -317,10 +317,15 @@ remote_build() {
             if [ -n "\$EXISTING_JAR" ]; then
                 echo "Found existing JAR: \$EXISTING_JAR"
                 echo "⚠️  WARNING: Using existing JAR file from previous build"
-                cp "\$EXISTING_JAR" pixels-worker-lambda.jar || {
-                    echo "❌ ERROR: Failed to copy existing JAR"
-                    exit 1
-                }
+                # Only copy if it's a different file
+                if [ "\$EXISTING_JAR" != "pixels-worker-lambda.jar" ]; then
+                    cp "\$EXISTING_JAR" pixels-worker-lambda.jar || {
+                        echo "❌ ERROR: Failed to copy existing JAR"
+                        exit 1
+                    }
+                else
+                    echo "JAR file already named correctly: pixels-worker-lambda.jar"
+                fi
             else
                 echo "❌ ERROR: Build failed and no existing JAR found"
                 exit 1
