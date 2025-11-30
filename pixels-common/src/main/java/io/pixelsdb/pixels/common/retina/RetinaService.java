@@ -50,35 +50,44 @@ public class RetinaService
 
     static
     {
-        RetinaService service;
-        String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
-        if ("true".equalsIgnoreCase(retinaEnabled)) {
-            try {
-                String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
-                int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
-                service = new RetinaService(retinaHost, retinaPort);
-                RetinaService finalService = service;
-                ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
-                    try {
-                        finalService.shutdown();
-                        for (RetinaService otherRetinaService : otherInstances.values()) {
-                            otherRetinaService.shutdown();
+        RetinaService service = disabledInstance; // Default to disabled
+        try
+        {
+            String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
+            if ("true".equalsIgnoreCase(retinaEnabled)) {
+                try {
+                    String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
+                    int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
+                    service = new RetinaService(retinaHost, retinaPort);
+                    RetinaService finalService = service;
+                    ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+                        try {
+                            finalService.shutdown();
+                            for (RetinaService otherRetinaService : otherInstances.values()) {
+                                otherRetinaService.shutdown();
+                            }
+                            otherInstances.clear();
+                        } catch (InterruptedException e) {
+                            logger.error("failed to shut down retina service", e);
                         }
-                        otherInstances.clear();
-                    } catch (InterruptedException e) {
-                        logger.error("failed to shut down retina service", e);
-                    }
-                });
-            }
-            catch (Exception e) {
-                // Catch all exceptions including RuntimeException from constructor (gRPC channel creation failures)
-                logger.warn(
-                        "Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.",
-                        e);
+                    });
+                }
+                catch (Exception e) {
+                    // Catch all exceptions including RuntimeException from constructor (gRPC channel creation failures)
+                    logger.warn(
+                            "Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.",
+                            e);
+                    service = disabledInstance;
+                }
+            } else {
+                logger.info("RetinaService is disabled by configuration (retina.enabled=" + retinaEnabled + ")");
                 service = disabledInstance;
             }
-        } else {
-            logger.info("RetinaService is disabled by configuration (retina.enabled=" + retinaEnabled + ")");
+        }
+        catch (Exception e)
+        {
+            // If config reading itself fails, default to disabled
+            logger.warn("Failed to read retina configuration, RetinaService will be disabled: " + e.getMessage(), e);
             service = disabledInstance;
         }
         defaultInstance = service;
