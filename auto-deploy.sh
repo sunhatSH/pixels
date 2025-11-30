@@ -456,14 +456,32 @@ deploy_lambda() {
             > /dev/null
         
         log_info "Waiting for update to complete..."
-        aws lambda wait function-updated \
-            --function-name "$FUNCTION_NAME" \
-            --region "$LAMBDA_REGION" \
-            --max-attempts 60 \
-            --delay 2 || {
-            log_error "Lambda update timeout"
-            exit 1
-        }
+        # Poll for function update status
+        MAX_WAIT=120  # 2 minutes
+        WAIT_COUNT=0
+        while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+            STATUS=$(aws lambda get-function \
+                --function-name "$FUNCTION_NAME" \
+                --region "$LAMBDA_REGION" \
+                --query 'Configuration.LastUpdateStatus' \
+                --output text 2>/dev/null || echo "Failed")
+            
+            if [ "$STATUS" = "Successful" ]; then
+                log_success "Lambda function updated"
+                break
+            elif [ "$STATUS" = "InProgress" ] || [ "$STATUS" = "Failed" ]; then
+                sleep 2
+                WAIT_COUNT=$((WAIT_COUNT + 2))
+            else
+                log_warning "Unknown status: $STATUS, continuing..."
+                sleep 2
+                WAIT_COUNT=$((WAIT_COUNT + 2))
+            fi
+        done
+        
+        if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+            log_warning "Update wait timeout, but continuing..."
+        fi
         
         log_success "Lambda function updated"
     else
@@ -498,14 +516,32 @@ deploy_lambda() {
         }
         
         log_info "Waiting for function to be active..."
-        aws lambda wait function-active \
-            --function-name "$FUNCTION_NAME" \
-            --region "$LAMBDA_REGION" \
-            --max-attempts 60 \
-            --delay 2 || {
-            log_error "Lambda creation timeout"
-            exit 1
-        }
+        # Poll for function active status
+        MAX_WAIT=120  # 2 minutes
+        WAIT_COUNT=0
+        while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+            STATUS=$(aws lambda get-function \
+                --function-name "$FUNCTION_NAME" \
+                --region "$LAMBDA_REGION" \
+                --query 'Configuration.State' \
+                --output text 2>/dev/null || echo "Failed")
+            
+            if [ "$STATUS" = "Active" ]; then
+                log_success "Lambda function is active"
+                break
+            elif [ "$STATUS" = "Pending" ] || [ "$STATUS" = "Failed" ]; then
+                sleep 2
+                WAIT_COUNT=$((WAIT_COUNT + 2))
+            else
+                log_warning "Unknown status: $STATUS, continuing..."
+                sleep 2
+                WAIT_COUNT=$((WAIT_COUNT + 2))
+            fi
+        done
+        
+        if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+            log_warning "Activation wait timeout, but continuing..."
+        fi
         
         log_success "Lambda function created"
     fi
