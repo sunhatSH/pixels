@@ -505,9 +505,39 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
         {
             try
             {
-                MetadataService metadataService = MetadataService.Instance();
-                long fileId = metadataService.getFileId(physicalReader.getPathUri());
-                rgVisibilityBitmaps = retinaService.queryVisibility(fileId, targetRGs, option.getTransTimestamp());
+                // Lazy initialize RetinaService with error handling
+                if (retinaService == null)
+                {
+                    try
+                    {
+                        retinaService = RetinaService.Instance();
+                    }
+                    catch (ExceptionInInitializerError | NoClassDefFoundError e)
+                    {
+                        logger.warn("Failed to initialize RetinaService: " + e.getMessage() + 
+                                ". RetinaService will be disabled. All rows will be considered visible.", e);
+                        retinaService = null;
+                    }
+                    catch (Exception e)
+                    {
+                        logger.warn("Failed to initialize RetinaService: " + e.getMessage() + 
+                                ". RetinaService will be disabled. All rows will be considered visible.", e);
+                        retinaService = null;
+                    }
+                }
+                
+                if (retinaService != null)
+                {
+                    MetadataService metadataService = MetadataService.Instance();
+                    long fileId = metadataService.getFileId(physicalReader.getPathUri());
+                    rgVisibilityBitmaps = retinaService.queryVisibility(fileId, targetRGs, option.getTransTimestamp());
+                }
+                else
+                {
+                    // RetinaService is not available, all rows are visible
+                    logger.debug("RetinaService is not available, skipping visibility query. All rows will be considered visible.");
+                    rgVisibilityBitmaps = null;
+                }
             } catch (IOException e)
             {
                 logger.error("Failed to get path uri");
