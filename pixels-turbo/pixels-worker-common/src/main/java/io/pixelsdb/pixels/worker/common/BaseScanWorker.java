@@ -82,6 +82,7 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
         scanOutput.setSuccessful(true);
         scanOutput.setErrorMessage("");
         workerMetrics.clear();
+        scanTimers.clear();
 
         try
         {
@@ -297,15 +298,26 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                 }
 
                 computeCostTimer.start();
+                int totalRows = 0;
                 do
                 {
-                    scanTimers.getComputeTimer().start();
+                    // Separate READ and COMPUTE stages
+                    scanTimers.getReadTimer().start();
                     rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                    scanTimers.getReadTimer().stop();
+
+                    // Debug log for row batch size
+                    // if (rowBatch.size > 0) {
+                    //    logger.info("Read batch size: " + rowBatch.size);
+                    // }
+
+                    scanTimers.getComputeTimer().start();
                     rowBatch = scanner.filterAndProject(rowBatch);
                     scanTimers.getComputeTimer().stop();
 
                     if (rowBatch.size > 0)
                     {
+                        totalRows += rowBatch.size;
                         if (partialAggregate)
                         {
                             aggregator.aggregate(rowBatch);
@@ -317,6 +329,11 @@ public class BaseScanWorker extends Worker<ScanInput, ScanOutput>
                         }
                     }
                 } while (!rowBatch.endOfFile);
+                logger.info("Processed total rows: " + totalRows + " from " + inputInfo.getPath());
+                
+                logger.info("Timer Check - READ: " + scanTimers.getReadTimeMs() + "ms, COMPUTE: " + 
+                            scanTimers.getComputeTimeMs() + "ms, WRITE: " + scanTimers.getWriteCacheTimeMs() + "ms");
+                
                 computeCostTimer.stop();
                 computeCostTimer.minus(recordReader.getReadTimeNanos());
                 readCostTimer.add(recordReader.getReadTimeNanos());

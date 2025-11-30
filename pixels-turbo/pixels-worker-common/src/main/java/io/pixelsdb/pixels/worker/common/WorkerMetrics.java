@@ -61,6 +61,12 @@ public class WorkerMetrics
             this.elapsedNs.addAndGet(-timeNs);
         }
 
+        public void reset()
+        {
+            elapsedNs.set(0);
+            startTime = 0L;
+        }
+
         public long getElapsedNs()
         {
             return elapsedNs.get();
@@ -99,7 +105,10 @@ public class WorkerMetrics
         }
 
         public void clear() {
-            // Timers are cumulative, no need to clear individual elapsed times
+            readTimer.reset();
+            computeTimer.reset();
+            writeCacheTimer.reset();
+            writeFileTimer.reset();
         }
 
         public long getReadTimeMs() {
