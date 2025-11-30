@@ -70,7 +70,7 @@ public class RetinaService
                     }
                 });
             }
-            catch (Exception | RuntimeException e) {
+            catch (Exception e) {
                 // Catch all exceptions including RuntimeException from constructor (gRPC channel creation failures)
                 logger.warn(
                         "Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.",
@@ -132,7 +132,7 @@ public class RetinaService
             this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
             this.isShutdown = false;
         }
-        catch (IllegalArgumentException | RuntimeException e)
+        catch (RuntimeException e)
         {
             // In Lambda environment, gRPC may fail with "NameResolver 'unix' not supported by transport"
             // Re-throw to be caught by static initializer
