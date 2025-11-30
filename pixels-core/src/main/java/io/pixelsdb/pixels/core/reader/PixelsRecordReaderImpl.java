@@ -57,7 +57,7 @@ import java.util.concurrent.CompletableFuture;
 public class PixelsRecordReaderImpl implements PixelsRecordReader
 {
     private static final Logger logger = LogManager.getLogger(PixelsRecordReaderImpl.class);
-    private final RetinaService retinaService = RetinaService.Instance();
+    private RetinaService retinaService = null;
 
     private final PhysicalReader physicalReader;
     private final PixelsProto.PostScript postScript;
@@ -506,6 +506,11 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
             try
             {
                 MetadataService metadataService = MetadataService.Instance();
+                // Lazy initialization of RetinaService to avoid static initialization issues in
+                // Lambda
+                if (retinaService == null) {
+                    retinaService = RetinaService.Instance();
+                }
                 long fileId = metadataService.getFileId(physicalReader.getPathUri());
                 rgVisibilityBitmaps = retinaService.queryVisibility(fileId, targetRGs, option.getTransTimestamp());
             } catch (IOException e)
