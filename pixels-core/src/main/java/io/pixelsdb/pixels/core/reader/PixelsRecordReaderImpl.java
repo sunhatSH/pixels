@@ -57,7 +57,7 @@ import java.util.concurrent.CompletableFuture;
 public class PixelsRecordReaderImpl implements PixelsRecordReader
 {
     private static final Logger logger = LogManager.getLogger(PixelsRecordReaderImpl.class);
-    private final RetinaService retinaService = RetinaService.Instance();
+    private RetinaService retinaService = null; // Lazy initialization with error handling
 
     private final PhysicalReader physicalReader;
     private final PixelsProto.PostScript postScript;
