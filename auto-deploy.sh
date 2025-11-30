@@ -283,13 +283,27 @@ remote_build() {
         CURRENT_REMOTE=\$(git remote get-url origin 2>/dev/null || echo "")
         EXPECTED_REMOTE="git@github.com:${REPO_USER}/${REPO_NAME}.git"
         
+        # Try to use current remote if it works, otherwise update
         if [ "\$CURRENT_REMOTE" != "\$EXPECTED_REMOTE" ]; then
-            echo "Updating Git remote URL..."
+            echo "Updating Git remote URL to: \$EXPECTED_REMOTE"
             git remote set-url origin "\$EXPECTED_REMOTE"
         fi
         
         echo "--- Pulling latest code ---"
-        git fetch origin
+        # Try SSH first, if fails try HTTPS
+        if ! git fetch origin 2>/dev/null; then
+            echo "SSH fetch failed, trying HTTPS..."
+            HTTPS_REMOTE="https://github.com/${REPO_USER}/${REPO_NAME}.git"
+            git remote set-url origin "\$HTTPS_REMOTE"
+            git fetch origin || {
+                echo "❌ ERROR: Cannot fetch from repository. Please ensure:"
+                echo "   1. Repository exists: https://github.com/${REPO_USER}/${REPO_NAME}"
+                echo "   2. EC2 has network access to GitHub"
+                echo "   3. Or configure SSH keys on EC2 for GitHub access"
+                exit 1
+            }
+        fi
+        
         git checkout $BRANCH
         git pull origin $BRANCH
         
