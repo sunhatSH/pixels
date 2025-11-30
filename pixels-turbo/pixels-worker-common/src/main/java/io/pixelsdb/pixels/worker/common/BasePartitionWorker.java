@@ -101,7 +101,12 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             requireNonNull(event.getOutput(), "event.output is null");
             StorageInfo outputStorageInfo = requireNonNull(event.getOutput().getStorageInfo(),
                     "output.storageInfo is null");
-            String outputPath = event.getOutput().getPath();
+            String outputFolder = event.getOutput().getPath();
+            if (!outputFolder.endsWith("/")) {
+                outputFolder += "/";
+            }
+            // Combine path and fileNames to get the full output path
+            String outputPath = outputFolder + event.getOutput().getFileNames().get(0);
             boolean encoding = event.getOutput().isEncoding();
 
             WorkerCommon.initStorage(inputStorageInfo);

@@ -19,19 +19,19 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 log_info() {
-    echo -e "${BLUE}ℹ️  [INFO]${NC} $1"
+    echo -e "${BLUE}[INFO]${NC} $1"
 }
 
 log_success() {
-    echo -e "${GREEN}✅ [SUCCESS]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
 log_warning() {
-    echo -e "${YELLOW}⚠️  [WARNING]${NC} $1"
+    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
 log_error() {
-    echo -e "${RED}❌ [ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
 # 检查本地文件
@@ -209,7 +209,7 @@ JSON
     fi
 }
 
-# test_partition_worker 
+test_partition_worker 
 
 # 步骤 4: 测试 AggregationWorker
 log_info ""
@@ -419,11 +419,73 @@ log_info "━━━━━━━━━━━━━━━━━━━━━━━�
 log_info ""
 log_info "前置步骤: 为 Join 生成分区文件..."
 
-# 先运行 PartitionWorker 为两个表生成分区文件
-generate_partitioned_files_for_join() {
-    local PARTITION_TIMESTAMP=$(date +%s)
+# 等待 S3 文件存在的函数（需要在调用前定义）
+wait_for_s3_file() {
+    local s3_path="$1"
+    local max_attempts=30
+    local attempt=0
+    local bucket=$(echo "$s3_path" | sed 's|s3://||' | cut -d'/' -f1)
+    local key=$(echo "$s3_path" | sed 's|s3://[^/]*/||')
     
-    log_info "为小表生成分区文件..." >&2
+    log_info "等待文件写入: $s3_path" >&2
+    while [ $attempt -lt $max_attempts ]; do
+        if aws s3 ls "s3://$bucket/$key" --region "$REGION" > /dev/null 2>&1; then
+            log_success "文件已存在: $s3_path" >&2
+            return 0
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+        if [ $((attempt % 5)) -eq 0 ]; then
+            log_info "等待中... ($attempt/$max_attempts)" >&2
+        fi
+    done
+    log_error "超时：文件未在 S3 中找到: $s3_path" >&2
+    return 1
+}
+
+# 检查是否使用已有的分区文件
+# 设置为 true 并指定文件路径来使用已有文件，否则会自动生成新文件
+USE_EXISTING_PARTITIONED_FILES=true
+if [ "$USE_EXISTING_PARTITIONED_FILES" = "true" ]; then
+    # 查找已有的分区文件
+    log_info "查找已有的分区文件..."
+    
+    # 使用固定的文件名（不带时间戳）
+    LATEST_SMALL="small_partitioned.pxl"
+    LATEST_LARGE="large_partitioned.pxl"
+    log_info "使用固定文件名（不带时间戳）"
+    
+    if [ -n "$LATEST_SMALL" ] && [ -n "$LATEST_LARGE" ]; then
+        SMALL_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/$LATEST_SMALL"
+        LARGE_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/$LATEST_LARGE"
+        
+        log_info "找到已有的分区文件:"
+        log_info "  小表: $SMALL_PARTITION_FILE"
+        log_info "  大表: $LARGE_PARTITION_FILE"
+        
+        # 验证文件存在
+        if ! wait_for_s3_file "$SMALL_PARTITION_FILE"; then
+            log_warning "小表分区文件不存在，切换到生成模式"
+            USE_EXISTING_PARTITIONED_FILES=false
+        elif ! wait_for_s3_file "$LARGE_PARTITION_FILE"; then
+            log_warning "大表分区文件不存在，切换到生成模式"
+            USE_EXISTING_PARTITIONED_FILES=false
+        else
+            log_success "所有分区文件已就绪（使用已有文件）"
+        fi
+    else
+        log_warning "未找到已有的分区文件，将生成新文件"
+        USE_EXISTING_PARTITIONED_FILES=false
+    fi
+fi
+
+# 如果需要生成新的分区文件
+if [ "$USE_EXISTING_PARTITIONED_FILES" = "false" ]; then
+    # 先运行 PartitionWorker 为两个表生成分区文件
+    generate_partitioned_files_for_join() {
+     local PARTITION_TIMESTAMP=$(date +%s)
+    
+log_info "为小表生成分区文件..." >&2
     cat > /tmp/partition-small-join.json << JSON
 {
   "transId": 12352,
@@ -461,9 +523,9 @@ generate_partitioned_files_for_join() {
     "numPartition": 4,
     "keyColumnIds": [0]
   },
-  "output": {
-    "path": "s3://pixels-turbo-intermediate/output/partitioned-join/",
-    "fileNames": ["small_partitioned_${PARTITION_TIMESTAMP}.pxl"],
+    "output": {
+      "path": "s3://pixels-turbo-intermediate/output/partitioned-join/",
+      "fileNames": ["small_partitioned.pxl"],
     "storageInfo": {
       "scheme": "s3",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
@@ -478,24 +540,24 @@ generate_partitioned_files_for_join() {
 JSON
     
     if aws lambda invoke \
-        --function-name pixels-partitionworker \
-        --payload file:///tmp/partition-small-join.json \
-        --cli-binary-format raw-in-base64-out \
-        --region "$REGION" \
-        /tmp/partition-small-join-response.json > /dev/null 2>&1; then
+         --function-name pixels-partitionworker \
+         --payload file:///tmp/partition-small-join.json \
+         --cli-binary-format raw-in-base64-out \
+         --region "$REGION" \
+         /tmp/partition-small-join-response.json > /dev/null 2>&1; then
         if grep -q '"successful":true' /tmp/partition-small-join-response.json 2>/dev/null; then
             log_success "小表分区文件生成成功" >&2
-            SMALL_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/small_partitioned_${PARTITION_TIMESTAMP}.pxl"
+            SMALL_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/small_partitioned.pxl"
         else
             log_error "小表分区文件生成失败" >&2
             return 1
         fi
     else
-        log_error "调用 PartitionWorker 失败" >&2
+         log_error "调用 PartitionWorker 失败" >&2
         return 1
     fi
     
-    log_info "为大表生成分区文件..." >&2
+log_info "为大表生成分区文件..." >&2
     cat > /tmp/partition-large-join.json << JSON
 {
   "transId": 12353,
@@ -533,9 +595,9 @@ JSON
     "numPartition": 4,
     "keyColumnIds": [1]
   },
-  "output": {
-    "path": "s3://pixels-turbo-intermediate/output/partitioned-join/",
-    "fileNames": ["large_partitioned_${PARTITION_TIMESTAMP}.pxl"],
+    "output": {
+      "path": "s3://pixels-turbo-intermediate/output/partitioned-join/",
+      "fileNames": ["large_partitioned.pxl"],
     "storageInfo": {
       "scheme": "s3",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
@@ -550,45 +612,56 @@ JSON
 JSON
     
     if aws lambda invoke \
-        --function-name pixels-partitionworker \
-        --payload file:///tmp/partition-large-join.json \
-        --cli-binary-format raw-in-base64-out \
-        --region "$REGION" \
-        /tmp/partition-large-join-response.json > /dev/null 2>&1; then
+         --function-name pixels-partitionworker \
+         --payload file:///tmp/partition-large-join.json \
+         --cli-binary-format raw-in-base64-out \
+         --region "$REGION" \
+         /tmp/partition-large-join-response.json > /dev/null 2>&1; then
         if grep -q '"successful":true' /tmp/partition-large-join-response.json 2>/dev/null; then
             log_success "大表分区文件生成成功" >&2
-            LARGE_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/large_partitioned_${PARTITION_TIMESTAMP}.pxl"
+            LARGE_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/large_partitioned.pxl"
         else
             log_error "大表分区文件生成失败" >&2
             return 1
         fi
     else
-        log_error "调用 PartitionWorker 失败" >&2
+         log_error "调用 PartitionWorker 失败" >&2
         return 1
     fi
     
-    # 等待文件完全写入
-    log_info "等待分区文件完全写入..." >&2
-    sleep 3
-    
-    # 只输出文件路径到 stdout，其他信息输出到 stderr
-    echo "$SMALL_PARTITION_FILE" >&1
-    echo "$LARGE_PARTITION_FILE" >&1
+     # 只输出文件路径到 stdout，其他信息输出到 stderr
+     echo "$SMALL_PARTITION_FILE" >&1
+     echo "$LARGE_PARTITION_FILE" >&1
 }
 
-# 生成分区文件
-PARTITION_FILES=$(generate_partitioned_files_for_join)
-if [ $? -ne 0 ]; then
-    log_error "生成分区文件失败，跳过 PartitionedJoinWorker 测试"
-    exit 1
+    # 生成分区文件
+    PARTITION_FILES=$(generate_partitioned_files_for_join)
+    if [ $? -ne 0 ]; then
+        log_error "生成分区文件失败，跳过 PartitionedJoinWorker 测试"
+        exit 1
+    fi
+
+    SMALL_PARTITION_FILE=$(echo "$PARTITION_FILES" | head -1)
+    LARGE_PARTITION_FILE=$(echo "$PARTITION_FILES" | tail -1)
+
+    log_info "使用新生成的分区文件:"
+    log_info "  小表: $SMALL_PARTITION_FILE"
+    log_info "  大表: $LARGE_PARTITION_FILE"
+
+    # 等待文件完全写入 S3
+    log_info "等待分区文件完全写入 S3..."
+    if ! wait_for_s3_file "$SMALL_PARTITION_FILE"; then
+        log_error "小表分区文件未找到，跳过测试"
+        exit 1
+    fi
+
+    if ! wait_for_s3_file "$LARGE_PARTITION_FILE"; then
+        log_error "大表分区文件未找到，跳过测试"
+        exit 1
+    fi
+
+    log_success "所有分区文件已就绪"
 fi
-
-SMALL_PARTITION_FILE=$(echo "$PARTITION_FILES" | head -1)
-LARGE_PARTITION_FILE=$(echo "$PARTITION_FILES" | tail -1)
-
-log_info "使用分区文件:"
-log_info "  小表: $SMALL_PARTITION_FILE"
-log_info "  大表: $LARGE_PARTITION_FILE"
 
 test_partitioned_join_worker() {
     local FUNC_NAME="pixels-partitionedjoinworker"
@@ -689,4 +762,3 @@ log_info "请使用以下命令提取性能数据："
 echo ""
 echo "python3 download-csv-metrics.py --region $REGION"
 echo ""
-
