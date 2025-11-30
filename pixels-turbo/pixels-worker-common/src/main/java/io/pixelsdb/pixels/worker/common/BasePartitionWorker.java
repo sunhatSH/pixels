@@ -106,7 +106,10 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 outputFolder += "/";
             }
             // Combine path and fileNames to get the full output path
-            String outputPath = outputFolder + event.getOutput().getPath();
+
+            // TODO 暂时硬编码 outputFolder，
+            outputFolder = "s3://pixels-turbo-intermediate/output/partitioned-join/";
+            String outputPath = outputFolder + event.getOutput().getFileNames().get(0);
             logger.info("PartitionWorker output path: " + outputPath);
             boolean encoding = event.getOutput().isEncoding();
 

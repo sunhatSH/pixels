@@ -126,7 +126,7 @@ JSON
     fi
 }
 
-# test_scan_worker
+test_scan_worker
 
 # 步骤 3: 测试 PartitionWorker
 log_info ""
@@ -293,7 +293,7 @@ JSON
     fi
 }
 
-# test_aggregation_worker
+test_aggregation_worker
 
 # 步骤 5: 测试 BroadcastJoinWorker
 log_info ""
@@ -413,7 +413,7 @@ JSON
     fi
 }
 
-# test_broadcast_join_worker
+test_broadcast_join_worker
 
 # 步骤 6: 测试 PartitionedJoinWorker
 log_info ""
