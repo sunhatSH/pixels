@@ -90,25 +90,8 @@
             <artifactId>grpc-context</artifactId>
             <optional>true</optional>
         </dependency>
-        <dependency>
-            <groupId>io.grpc</groupId>
-            <artifactId>grpc-netty</artifactId>
-            <optional>true</optional>
-            <exclusions>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty-codec-http2</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty-handler-proxy</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.netty</groupId>
-                    <artifactId>netty-transport-native-unix-common</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+        <!-- Removed grpc-netty to avoid conflict with grpc-netty-shaded in Lambda environment -->
+        <!-- grpc-netty-shaded is self-contained and avoids unix transport issues -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-grpclb</artifactId>
