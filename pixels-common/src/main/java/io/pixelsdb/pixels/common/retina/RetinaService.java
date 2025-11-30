@@ -70,14 +70,15 @@ public class RetinaService
                     }
                 });
             }
-            catch (Exception e) {
+            catch (Exception | RuntimeException e) {
+                // Catch all exceptions including RuntimeException from constructor (gRPC channel creation failures)
                 logger.warn(
                         "Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.",
                         e);
                 service = disabledInstance;
             }
         } else {
-            logger.info("RetinaService is disabled by configuration (retina.enabled=false)");
+            logger.info("RetinaService is disabled by configuration (retina.enabled=" + retinaEnabled + ")");
             service = disabledInstance;
         }
         defaultInstance = service;
@@ -120,14 +121,23 @@ public class RetinaService
     {
         assert (host != null);
         assert (port > 0 && port <= 65535);
-        this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
+        try
+        {
+            this.channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext()
 //                .keepAliveTime(1, TimeUnit.SECONDS)
 //                .keepAliveTimeout(3, TimeUnit.SECONDS)
 //                .keepAliveWithoutCalls(true)
-                .build();
-        this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
-        this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
-        this.isShutdown = false;
+                    .build();
+            this.stub = RetinaWorkerServiceGrpc.newBlockingStub(this.channel);
+            this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
+            this.isShutdown = false;
+        }
+        catch (IllegalArgumentException | RuntimeException e)
+        {
+            // In Lambda environment, gRPC may fail with "NameResolver 'unix' not supported by transport"
+            // Re-throw to be caught by static initializer
+            throw new RuntimeException("Failed to create RetinaService gRPC channel: " + e.getMessage(), e);
+        }
     }
 
     /**
