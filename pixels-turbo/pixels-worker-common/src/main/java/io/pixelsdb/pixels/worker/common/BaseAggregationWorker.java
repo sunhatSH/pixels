@@ -297,8 +297,12 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                         computeCostTimer.start();
                         do
                         {
-                            aggregationTimers.getComputeTimer().start();
+                            // Separate READ and COMPUTE stages
+                            aggregationTimers.getReadTimer().start();
                             rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                            aggregationTimers.getReadTimer().stop();
+
+                            aggregationTimers.getComputeTimer().start();
                             if (rowBatch.size > 0)
                             {
                                 numRows += rowBatch.size;
@@ -332,16 +336,21 @@ public class BaseAggregationWorker extends Worker<AggregationInput, AggregationO
                             VectorizedRowBatch rowBatch;
 
                             // Sync compute timer with stage timers
-                            aggregationTimers.getComputeTimer().start();
                             computeCostTimer.start();
                             do
                             {
+                                // Separate READ and COMPUTE stages
+                                aggregationTimers.getReadTimer().start();
                                 rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                                aggregationTimers.getReadTimer().stop();
+
+                                aggregationTimers.getComputeTimer().start();
                                 if (rowBatch.size > 0)
                                 {
                                     numRows += rowBatch.size;
                                     aggregator.aggregate(rowBatch);
                                 }
+                                aggregationTimers.getComputeTimer().stop();
                             } while (!rowBatch.endOfFile);
                             computeCostTimer.stop();
                             aggregationTimers.getComputeTimer().stop();

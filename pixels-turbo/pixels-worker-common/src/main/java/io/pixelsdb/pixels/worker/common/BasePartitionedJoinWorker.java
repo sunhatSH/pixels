@@ -435,15 +435,20 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
                         // Use stage timers for compute timing
-                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
+                            // Separate READ and COMPUTE stages
+                            partitionedJoinTimers.getReadTimer().start();
                             rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                            partitionedJoinTimers.getReadTimer().stop();
+
+                            partitionedJoinTimers.getComputeTimer().start();
                             if (rowBatch.size > 0)
                             {
                                 joiner.populateLeftTable(rowBatch);
                             }
+                            partitionedJoinTimers.getComputeTimer().stop();
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
                         partitionedJoinTimers.getComputeTimer().stop();
@@ -544,11 +549,15 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
                         // Use stage timers for compute timing
-                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
+                            // Separate READ and COMPUTE stages
+                            partitionedJoinTimers.getReadTimer().start();
                             rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                            partitionedJoinTimers.getReadTimer().stop();
+
+                            partitionedJoinTimers.getComputeTimer().start();
                             if (rowBatch.size > 0)
                             {
                                 List<VectorizedRowBatch> joinedBatches = joiner.join(rowBatch);
@@ -561,6 +570,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                                     }
                                 }
                             }
+                            partitionedJoinTimers.getComputeTimer().stop();
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
                         partitionedJoinTimers.getComputeTimer().stop();
@@ -674,11 +684,15 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                         checkArgument(recordReader.isValid(), "failed to get record reader");
 
                         // Use stage timers for compute timing
-                        partitionedJoinTimers.getComputeTimer().start();
                         computeCostTimer.start();
                         do
                         {
+                            // Separate READ and COMPUTE stages
+                            partitionedJoinTimers.getReadTimer().start();
                             rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                            partitionedJoinTimers.getReadTimer().stop();
+
+                            partitionedJoinTimers.getComputeTimer().start();
                             if (rowBatch.size > 0)
                             {
                                 List<VectorizedRowBatch> joinedBatches = joiner.join(rowBatch);
@@ -695,6 +709,7 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                                     }
                                 }
                             }
+                            partitionedJoinTimers.getComputeTimer().stop();
                         } while (!rowBatch.endOfFile);
                         computeCostTimer.stop();
                         partitionedJoinTimers.getComputeTimer().stop();

@@ -360,17 +360,22 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
                     // Sync compute timer with stage timers
-                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
+                        // Separate READ and COMPUTE stages
+                        broadcastJoinTimers.getReadTimer().start();
                         rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                        broadcastJoinTimers.getReadTimer().stop();
+
+                        broadcastJoinTimers.getComputeTimer().start();
                         leftFilter.doFilter(rowBatch, filtered, tmp);
                         rowBatch.applyFilter(filtered);
                         if (rowBatch.size > 0)
                         {
                             joiner.populateLeftTable(rowBatch);
                         }
+                        broadcastJoinTimers.getComputeTimer().stop();
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
                     broadcastJoinTimers.getComputeTimer().stop();
@@ -467,11 +472,15 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
                     // Sync compute timer with stage timers
-                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
+                        // Separate READ and COMPUTE stages
+                        broadcastJoinTimers.getReadTimer().start();
                         rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                        broadcastJoinTimers.getReadTimer().stop();
+
+                        broadcastJoinTimers.getComputeTimer().start();
                         rightFilter.doFilter(rowBatch, filtered, tmp);
                         rowBatch.applyFilter(filtered);
                         if (rowBatch.size > 0)
@@ -486,6 +495,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                                 }
                             }
                         }
+                        broadcastJoinTimers.getComputeTimer().stop();
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
                     broadcastJoinTimers.getComputeTimer().stop();
@@ -583,11 +593,15 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                     Bitmap filtered = new Bitmap(WorkerCommon.rowBatchSize, true);
                     Bitmap tmp = new Bitmap(WorkerCommon.rowBatchSize, false);
                     // Sync compute timer with stage timers
-                    broadcastJoinTimers.getComputeTimer().start();
                     computeCostTimer.start();
                     do
                     {
+                        // Separate READ and COMPUTE stages
+                        broadcastJoinTimers.getReadTimer().start();
                         rowBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                        broadcastJoinTimers.getReadTimer().stop();
+
+                        broadcastJoinTimers.getComputeTimer().start();
                         rightFilter.doFilter(rowBatch, filtered, tmp);
                         rowBatch.applyFilter(filtered);
                         if (rowBatch.size > 0)
@@ -606,6 +620,7 @@ public class BaseBroadcastJoinWorker extends Worker<BroadcastJoinInput, JoinOutp
                                 }
                             }
                         }
+                        broadcastJoinTimers.getComputeTimer().stop();
                     } while (!rowBatch.endOfFile);
                     computeCostTimer.stop();
                     broadcastJoinTimers.getComputeTimer().stop();

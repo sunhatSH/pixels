@@ -276,10 +276,16 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                 computeCostTimer.start();
                 do
                 {
+                    // Separate READ and COMPUTE stages
+                    partitionTimers.getReadTimer().start();
+                    VectorizedRowBatch rawBatch = recordReader.readBatch(WorkerCommon.rowBatchSize);
+                    partitionTimers.getReadTimer().stop();
+
                     partitionTimers.getComputeTimer().start();
-                    rowBatch = scanner.filterAndProject(recordReader.readBatch(WorkerCommon.rowBatchSize));
+                    rowBatch = scanner.filterAndProject(rawBatch);
                     if (rowBatch.size > 0)
                     {
+                        // Partitioning operation is part of COMPUTE stage
                         Map<Integer, VectorizedRowBatch> result = partitioner.partition(rowBatch);
                         if (!result.isEmpty())
                         {
@@ -291,7 +297,6 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                     }
                     partitionTimers.getComputeTimer().stop();
                 } while (!rowBatch.endOfFile);
-                partitionTimers.getComputeTimer().stop();
                 computeCostTimer.minus(recordReader.getReadTimeNanos());
                 readCostTimer.add(recordReader.getReadTimeNanos());
                 readBytes += recordReader.getCompletedBytes();
