@@ -584,7 +584,7 @@ test_lambda() {
         ]
       }
     ],
-    "filter": null
+    "filter": "{\"schemaName\":\"test\",\"tableName\":\"test_table\",\"columnFilters\":{}}"
   },
   "scanProjection": [true, true, true],
   "partialAggregationPresent": false,
