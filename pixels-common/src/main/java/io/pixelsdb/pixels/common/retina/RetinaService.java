@@ -51,39 +51,50 @@ public class RetinaService
     static
     {
         RetinaService service;
-        String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
-        if ("true".equalsIgnoreCase(retinaEnabled))
+        try
         {
-            try
+            String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
+            if ("true".equalsIgnoreCase(retinaEnabled))
             {
-                String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
-                int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
-                service = new RetinaService(retinaHost, retinaPort);
-                RetinaService finalService = service;
-                ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
-                    try
-                    {
-                        finalService.shutdown();
-                        for (RetinaService otherRetinaService : otherInstances.values())
+                try
+                {
+                    String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
+                    int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
+                    service = new RetinaService(retinaHost, retinaPort);
+                    RetinaService finalService = service;
+                    ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+                        try
                         {
-                            otherRetinaService.shutdown();
+                            finalService.shutdown();
+                            for (RetinaService otherRetinaService : otherInstances.values())
+                            {
+                                otherRetinaService.shutdown();
+                            }
+                            otherInstances.clear();
+                        } catch (InterruptedException e)
+                        {
+                            logger.error("failed to shut down retina service", e);
                         }
-                        otherInstances.clear();
-                    } catch (InterruptedException e)
-                    {
-                        logger.error("failed to shut down retina service", e);
-                    }
-                });
+                    });
+                }
+                catch (Exception e)
+                {
+                    logger.warn("Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.", e);
+                    service = disabledInstance;
+                }
             }
-            catch (Exception e)
+            else
             {
-                logger.warn("Failed to initialize RetinaService: " + e.getMessage() + ". RetinaService will be disabled.", e);
+                logger.info("RetinaService is disabled by configuration (retina.enabled=false or not set)");
                 service = disabledInstance;
             }
         }
-        else
+        catch (ExceptionInInitializerError | NoClassDefFoundError | Exception e)
         {
-            logger.info("RetinaService is disabled by configuration (retina.enabled=false)");
+            // Catch all exceptions during static initialization, including configuration reading errors
+            logger.warn("Failed to initialize RetinaService during static initialization: " + 
+                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
+                    ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
             service = disabledInstance;
         }
         defaultInstance = service;
@@ -98,7 +109,17 @@ public class RetinaService
      */
     public static RetinaService Instance()
     {
-        return defaultInstance;
+        try
+        {
+            return defaultInstance;
+        }
+        catch (ExceptionInInitializerError | NoClassDefFoundError e)
+        {
+            // If static initialization failed, return disabled instance
+            logger.warn("RetinaService static initialization failed, returning disabled instance: " + 
+                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+            return disabledInstance;
+        }
     }
 
     /**
