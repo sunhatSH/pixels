@@ -65,6 +65,7 @@ test_scan_worker() {
     "columnsToRead": ["id", "col1", "col2", "col3", "col4", "col5"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -93,6 +94,7 @@ test_scan_worker() {
     "fileNames": ["scan_result_$TIMESTAMP.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -149,6 +151,7 @@ test_partition_worker() {
     "columnsToRead": ["key", "value1", "value2", "value3", "value4"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -180,6 +183,7 @@ test_partition_worker() {
     "fileNames": ["partition_result_$TIMESTAMP.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -248,6 +252,7 @@ test_aggregation_worker() {
     "columnsToRead": ["group_key", "agg_col1", "agg_col2", "agg_col3", "agg_col4"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputFiles": [
@@ -260,6 +265,7 @@ test_aggregation_worker() {
     "fileNames": ["aggregation_result_$TIMESTAMP.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -316,6 +322,7 @@ test_broadcast_join_worker() {
     "columnsToRead": ["join_key", "col1", "col2"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -343,6 +350,7 @@ test_broadcast_join_worker() {
     "columnsToRead": ["id", "join_key", "col1", "col2", "col3", "col4"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -380,6 +388,7 @@ test_broadcast_join_worker() {
     "fileNames": ["broadcast_join_result_$TIMESTAMP.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -494,6 +503,7 @@ log_info "为小表生成分区文件..." >&2
     "columnsToRead": ["join_key", "col1", "col2", "col3"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -525,6 +535,7 @@ log_info "为小表生成分区文件..." >&2
       "fileNames": ["small_partitioned.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -571,6 +582,7 @@ log_info "为大表生成分区文件..." >&2
     "columnsToRead": ["id", "join_key", "col1", "col2", "col3", "col4", "col5"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputSplits": [
@@ -602,6 +614,7 @@ log_info "为大表生成分区文件..." >&2
       "fileNames": ["large_partitioned.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
@@ -686,6 +699,7 @@ test_partitioned_join_worker() {
     "columnsToRead": ["join_key", "col1", "col2", "col3"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputFiles": [
@@ -700,6 +714,7 @@ test_partitioned_join_worker() {
     "columnsToRead": ["id", "join_key", "col1", "col2", "col3", "col4", "col5"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "inputFiles": [
@@ -726,6 +741,7 @@ test_partitioned_join_worker() {
     "fileNames": ["partitioned_join_result_$TIMESTAMP.pxl"],
     "storageInfo": {
       "scheme": "s3",
+      "region": "${REGION}",
       "endpoint": "https://s3.${REGION}.amazonaws.com"
     },
     "encoding": true
