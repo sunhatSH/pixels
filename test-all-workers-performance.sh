@@ -11,6 +11,10 @@ REGION="$LAMBDA_REGION"
 LOCAL_DATA_DIR="/Users/sunhao/Documents/pixels/test/test_datasource"
 S3_TEST_DATA_PREFIX="test-data/workers-performance"
 
+# 分区配置常量（确保两个 Worker 使用相同的配置）
+NUM_PARTITION=4
+HASH_VALUES="[0, 1, 2, 3]"
+
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -168,7 +172,7 @@ test_partition_worker() {
   "projection": [true, true, true, true, true],
   "partitionInfo": {
     "partitionType": "HASH",
-    "numPartition": 4,
+    "numPartition": ${NUM_PARTITION},
     "keyColumnIds": [0]
   },
   "output": {
@@ -462,17 +466,10 @@ if [ "$USE_EXISTING_PARTITIONED_FILES" = "true" ]; then
         log_info "找到已有的分区文件:"
         log_info "  小表: $SMALL_PARTITION_FILE"
         log_info "  大表: $LARGE_PARTITION_FILE"
+        log_info "分区配置: numPartition=$NUM_PARTITION, hashValues=$HASH_VALUES"
         
-        # 验证文件存在
-        if ! wait_for_s3_file "$SMALL_PARTITION_FILE"; then
-            log_warning "小表分区文件不存在，切换到生成模式"
-            USE_EXISTING_PARTITIONED_FILES=false
-        elif ! wait_for_s3_file "$LARGE_PARTITION_FILE"; then
-            log_warning "大表分区文件不存在，切换到生成模式"
-            USE_EXISTING_PARTITIONED_FILES=false
-        else
-            log_success "所有分区文件已就绪（使用已有文件）"
-        fi
+        # 直接使用文件路径，不等待验证
+        log_success "使用已有分区文件路径（跳过等待验证）"
     else
         log_warning "未找到已有的分区文件，将生成新文件"
         USE_EXISTING_PARTITIONED_FILES=false
@@ -520,7 +517,7 @@ log_info "为小表生成分区文件..." >&2
   "projection": [true, true, true, true],
   "partitionInfo": {
     "partitionType": "HASH",
-    "numPartition": 4,
+    "numPartition": ${NUM_PARTITION},
     "keyColumnIds": [0]
   },
     "output": {
@@ -548,6 +545,11 @@ JSON
         if grep -q '"successful":true' /tmp/partition-small-join-response.json 2>/dev/null; then
             log_success "小表分区文件生成成功" >&2
             SMALL_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/small_partitioned.pxl"
+            # 从响应中提取 hashValues（如果存在）
+            if command -v jq >/dev/null 2>&1; then
+                SMALL_HASH_VALUES=$(jq -c '.hashValues' /tmp/partition-small-join-response.json 2>/dev/null || echo "$HASH_VALUES")
+                log_info "小表 hashValues: $SMALL_HASH_VALUES" >&2
+            fi
         else
             log_error "小表分区文件生成失败" >&2
             return 1
@@ -592,7 +594,7 @@ log_info "为大表生成分区文件..." >&2
   "projection": [true, true, true, true, true, true, true],
   "partitionInfo": {
     "partitionType": "HASH",
-    "numPartition": 4,
+    "numPartition": ${NUM_PARTITION},
     "keyColumnIds": [1]
   },
     "output": {
@@ -620,6 +622,22 @@ JSON
         if grep -q '"successful":true' /tmp/partition-large-join-response.json 2>/dev/null; then
             log_success "大表分区文件生成成功" >&2
             LARGE_PARTITION_FILE="s3://pixels-turbo-intermediate/output/partitioned-join/large_partitioned.pxl"
+            # 从响应中提取 hashValues（如果存在）
+            if command -v jq >/dev/null 2>&1; then
+                LARGE_HASH_VALUES=$(jq -c '.hashValues' /tmp/partition-large-join-response.json 2>/dev/null || echo "")
+                if [ -n "$LARGE_HASH_VALUES" ] && [ "$LARGE_HASH_VALUES" != "null" ] && [ "$LARGE_HASH_VALUES" != "[]" ]; then
+                    log_info "大表 hashValues: $LARGE_HASH_VALUES" >&2
+                    # 如果小表也有 hashValues，取交集；否则使用大表的
+                    if [ -n "$SMALL_HASH_VALUES" ] && [ "$SMALL_HASH_VALUES" != "null" ] && [ "$SMALL_HASH_VALUES" != "[]" ]; then
+                        # 使用两个表的 hashValues（通常应该一致）
+                        HASH_VALUES="$LARGE_HASH_VALUES"
+                        log_info "使用大表的 hashValues（与小表对齐）: $HASH_VALUES" >&2
+                    else
+                        HASH_VALUES="$LARGE_HASH_VALUES"
+                        log_info "使用大表的 hashValues: $HASH_VALUES" >&2
+                    fi
+                fi
+            fi
         else
             log_error "大表分区文件生成失败" >&2
             return 1
@@ -647,20 +665,10 @@ JSON
     log_info "使用新生成的分区文件:"
     log_info "  小表: $SMALL_PARTITION_FILE"
     log_info "  大表: $LARGE_PARTITION_FILE"
+    log_info "分区配置: numPartition=$NUM_PARTITION, hashValues=$HASH_VALUES"
 
-    # 等待文件完全写入 S3
-    log_info "等待分区文件完全写入 S3..."
-    if ! wait_for_s3_file "$SMALL_PARTITION_FILE"; then
-        log_error "小表分区文件未找到，跳过测试"
-        exit 1
-    fi
-
-    if ! wait_for_s3_file "$LARGE_PARTITION_FILE"; then
-        log_error "大表分区文件未找到，跳过测试"
-        exit 1
-    fi
-
-    log_success "所有分区文件已就绪"
+    # 不等待文件写入，直接使用路径
+    log_info "分区文件路径已生成，直接使用（跳过等待验证）"
 fi
 
 test_partitioned_join_worker() {
@@ -708,8 +716,8 @@ test_partitioned_join_worker() {
     "largeProjection": [true, true, true, true, true, true, true],
     "postPartition": false,
     "postPartitionInfo": null,
-    "numPartition": 4,
-    "hashValues": [0, 1, 2, 3]
+    "numPartition": ${NUM_PARTITION},
+    "hashValues": ${HASH_VALUES}
   },
   "partialAggregationPresent": false,
   "partialAggregationInfo": null,

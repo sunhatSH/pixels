@@ -107,6 +107,7 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             }
             // Combine path and fileNames to get the full output path
             String outputPath = outputFolder + event.getOutput().getFileNames().get(0);
+            logger.info("PartitionWorker output path: " + outputPath);
             boolean encoding = event.getOutput().isEncoding();
 
             WorkerCommon.initStorage(inputStorageInfo);
@@ -181,6 +182,7 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
                     hashValues.add(hash);
                 }
             }
+            logger.info("PartitionWorker adding output to response: " + outputPath);
             partitionOutput.addOutput(outputPath);
             partitionOutput.setHashValues(hashValues);
 
