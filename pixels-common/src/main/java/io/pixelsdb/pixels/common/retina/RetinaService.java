@@ -60,22 +60,41 @@ public class RetinaService
                 {
                     String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
                     int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));
-                    service = new RetinaService(retinaHost, retinaPort);
-                    RetinaService finalService = service;
-                    ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
-                        try
-                        {
-                            finalService.shutdown();
-                            for (RetinaService otherRetinaService : otherInstances.values())
+                    try
+                    {
+                        service = new RetinaService(retinaHost, retinaPort);
+                        RetinaService finalService = service;
+                        ShutdownHookManager.Instance().registerShutdownHook(RetinaService.class, false, () -> {
+                            try
                             {
-                                otherRetinaService.shutdown();
+                                finalService.shutdown();
+                                for (RetinaService otherRetinaService : otherInstances.values())
+                                {
+                                    otherRetinaService.shutdown();
+                                }
+                                otherInstances.clear();
+                            } catch (InterruptedException e)
+                            {
+                                logger.error("failed to shut down retina service", e);
                             }
-                            otherInstances.clear();
-                        } catch (InterruptedException e)
-                        {
-                            logger.error("failed to shut down retina service", e);
-                        }
-                    });
+                        });
+                    }
+                    catch (IllegalArgumentException e)
+                    {
+                        // Catch gRPC channel creation failures (e.g., "NameResolver 'unix' not supported by transport" in Lambda)
+                        logger.warn("Failed to create RetinaService instance due to IllegalArgumentException: " + 
+                                (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
+                                ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
+                        service = disabledInstance;
+                    }
+                    catch (RuntimeException e)
+                    {
+                        // Catch other runtime exceptions from constructor (e.g., wrapped exceptions)
+                        logger.warn("Failed to create RetinaService instance due to RuntimeException: " + 
+                                (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
+                                ". RetinaService will be disabled. This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
+                        service = disabledInstance;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -158,13 +177,17 @@ public class RetinaService
             this.asyncStub = RetinaWorkerServiceGrpc.newStub(this.channel);
             this.isShutdown = false;
         }
-        catch (IllegalArgumentException | RuntimeException e)
+        catch (IllegalArgumentException e)
         {
             // In environments like AWS Lambda, gRPC channel creation may fail due to unsupported transport types
-            // Wrap the exception and rethrow it so it can be caught by the static initializer
-            throw new RuntimeException("Failed to create gRPC channel for RetinaService: " + 
-                    (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + 
-                    ". This is normal in environments where RetinaService is not available (e.g., AWS Lambda).", e);
+            // (e.g., "NameResolver 'unix' not supported by transport")
+            // Re-throw as-is so it can be caught by the static initializer
+            throw e;
+        }
+        catch (RuntimeException e)
+        {
+            // Re-throw other runtime exceptions as-is
+            throw e;
         }
     }
 
