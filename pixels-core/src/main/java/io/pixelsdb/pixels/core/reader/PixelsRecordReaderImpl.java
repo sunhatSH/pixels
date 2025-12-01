@@ -505,6 +505,10 @@ public class PixelsRecordReaderImpl implements PixelsRecordReader
         {
             try
             {
+                // Lazy initialization of RetinaService to avoid static initialization issues in Lambda
+                if (retinaService == null) {
+                    retinaService = RetinaService.Instance();
+                }
                 MetadataService metadataService = MetadataService.Instance();
                 // Lazy initialization of RetinaService to avoid static initialization issues in
                 // Lambda

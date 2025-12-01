@@ -32,6 +32,8 @@ import io.pixelsdb.pixels.executor.predicate.TableScanFilter;
 import io.pixelsdb.pixels.executor.scan.Scanner;
 import io.pixelsdb.pixels.planner.plan.physical.domain.InputInfo;
 import io.pixelsdb.pixels.planner.plan.physical.domain.InputSplit;
+import io.pixelsdb.pixels.planner.plan.physical.domain.MultiOutputInfo;
+import io.pixelsdb.pixels.planner.plan.physical.domain.OutputInfo;
 import io.pixelsdb.pixels.planner.plan.physical.domain.StorageInfo;
 import io.pixelsdb.pixels.planner.plan.physical.input.PartitionInput;
 import io.pixelsdb.pixels.planner.plan.physical.output.PartitionOutput;
@@ -101,16 +103,68 @@ public class BasePartitionWorker extends Worker<PartitionInput, PartitionOutput>
             requireNonNull(event.getOutput(), "event.output is null");
             StorageInfo outputStorageInfo = requireNonNull(event.getOutput().getStorageInfo(),
                     "output.storageInfo is null");
-            String outputFolder = event.getOutput().getPath();
+            String outputFolder = event.getOutput().getPath();// s3://pixels-turbo-intermediate/output/partitioned-join/
             if (!outputFolder.endsWith("/")) {
                 outputFolder += "/";
             }
+<<<<<<< Current (Your changes)
             // Combine path and fileNames to get the full output path
-
-            // TODO 暂时硬编码 outputFolder，
+            // TODO 暂时硬编码
+            String outputPath = outputFolder + event.getOutput().getFileNames().get(1);
+            List<String> fileNames = event.getOutput().getFileNames();
+            fileNames.stream().forEach(fileName -> {
+                logger.info("PartitionWorker filename: " + fileName);
+            });
+            logger.info("output is : " + JSON.toJSONString(event.getOutput()));
+=======
+            logger.info("PartitionWorker: outputFolder: " + outputFolder);
+            
+            // 确定输出文件名
+            // 根据表名生成文件名：small_table -> small_partitioned.pxl, large_table -> large_partitioned.pxl
+            String tableName = event.getTableInfo().getTableName();
+            String outputFileName;
+            
+            // 尝试从 MultiOutputInfo 获取文件名（如果 JSON 反序列化为 MultiOutputInfo）
+            OutputInfo outputInfo = event.getOutput();
+            logger.info("PartitionWorker: outputInfo 类型: " + outputInfo.getClass().getName());
+            logger.info("PartitionWorker: outputInfo.getPath(): " + outputInfo.getPath());
+            
+            if (outputInfo instanceof MultiOutputInfo) {
+                MultiOutputInfo multiOutputInfo = (MultiOutputInfo) outputInfo;
+                logger.info("PartitionWorker: MultiOutputInfo.getFileNames(): " + multiOutputInfo.getFileNames());
+                if (multiOutputInfo.getFileNames() != null && !multiOutputInfo.getFileNames().isEmpty()) {
+                    outputFileName = multiOutputInfo.getFileNames().get(0);
+                    logger.info("PartitionWorker: 使用 MultiOutputInfo 中的文件名: " + outputFileName);
+                } else {
+                    // 根据表名生成文件名
+                    outputFileName = tableName + "_partitioned.pxl";
+                    logger.info("PartitionWorker: MultiOutputInfo 中没有 fileNames，根据表名生成: " + outputFileName);
+                }
+            } else {
+                // 如果 output 是普通的 OutputInfo，根据表名生成文件名
+                // 将表名转换为期望的文件名格式：small_table -> small, large_table -> large
+                if (tableName.endsWith("_table")) {
+                    outputFileName = tableName.substring(0, tableName.length() - 6) + "_partitioned.pxl";
+                } else {
+                    outputFileName = tableName + "_partitioned.pxl";
+                }
+                logger.info("PartitionWorker: OutputInfo 类型，根据表名生成文件名: " + outputFileName);
+            }
+            
+            // 确保 outputFileName 不包含路径，只包含文件名
+            if (outputFileName.contains("/")) {
+                String originalFileName = outputFileName;
+                outputFileName = outputFileName.substring(outputFileName.lastIndexOf("/") + 1);
+                logger.info("PartitionWorker: 从路径中提取文件名: " + originalFileName + " -> " + outputFileName);
+            }
+            
+            // 构建完整的输出路径
             outputFolder = "s3://pixels-turbo-intermediate/output/partitioned-join/";
-            String outputPath = outputFolder + event.getOutput().getPath();
+            // String outputPath = outputFolder + event.getOutput().getFileNames().get(0); 错误
+            String outputPath = outputFolder + outputFileName;
+            logger.info("PartitionWorker: outputFolder=" + outputFolder + ", outputFileName=" + outputFileName);
             logger.info("PartitionWorker output path: " + outputPath);
+>>>>>>> Incoming (Background Agent changes)
             boolean encoding = event.getOutput().isEncoding();
 
             WorkerCommon.initStorage(inputStorageInfo);

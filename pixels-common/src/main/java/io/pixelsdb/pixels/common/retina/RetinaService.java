@@ -46,15 +46,28 @@ public class RetinaService
     private static final Logger logger = LogManager.getLogger(RetinaService.class);
     private static final RetinaService defaultInstance;
     private static final Map<HostAddress, RetinaService> otherInstances = new ConcurrentHashMap<>();
-    private static final RetinaService disabledInstance = new RetinaService(true);
-
+    // Create disabledInstance first to avoid any potential issues during static initialization
+    private static final RetinaService disabledInstance;
+    
     static
     {
+        // Initialize disabledInstance first
+        RetinaService tempDisabled = null;
+        try {
+            tempDisabled = new RetinaService(true);
+        } catch (Throwable e) {
+            // This should never happen, but handle it just in case
+            logger.error("Failed to create disabled RetinaService instance", e);
+            throw new ExceptionInInitializerError(e);
+        }
+        disabledInstance = tempDisabled;
+        
         RetinaService service = disabledInstance; // Default to disabled
         try
         {
             String retinaEnabled = ConfigFactory.Instance().getProperty("retina.enabled");
-            if ("true".equalsIgnoreCase(retinaEnabled)) {
+            // In Lambda environment, if retina.enabled is null or not "true", use disabled instance
+            if (retinaEnabled != null && "true".equalsIgnoreCase(retinaEnabled)) {
                 try {
                     String retinaHost = ConfigFactory.Instance().getProperty("retina.server.host");
                     int retinaPort = Integer.parseInt(ConfigFactory.Instance().getProperty("retina.server.port"));

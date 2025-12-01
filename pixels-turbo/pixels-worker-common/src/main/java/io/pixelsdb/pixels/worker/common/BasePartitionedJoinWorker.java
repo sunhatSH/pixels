@@ -38,6 +38,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.*;
 import java.io.IOException;
 import java.util.*;
+import java.util.Arrays;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -154,6 +155,22 @@ public class BasePartitionedJoinWorker extends Worker<PartitionedJoinInput, Join
                     WorkerCommon.getStorage(leftInputStorageInfo.getScheme()),
                     WorkerCommon.getStorage(rightInputStorageInfo.getScheme()),
                     leftSchema, rightSchema, leftPartitioned, rightPartitioned);
+            
+            // Check if schemas were successfully read
+            if (leftSchema.get() == null) {
+                throw new WorkerException("Failed to read file schema for the left table (small table). " +
+                        "Left partitioned files: " + leftPartitioned);
+            }
+            if (rightSchema.get() == null) {
+                throw new WorkerException("Failed to read file schema for the right table (large table). " +
+                        "Right partitioned files: " + rightPartitioned);
+            }
+            
+            logger.info("Left table schema fields: " + leftSchema.get().getFieldNames() + 
+                    ", columnsToRead: " + Arrays.toString(leftColumnsToRead));
+            logger.info("Right table schema fields: " + rightSchema.get().getFieldNames() + 
+                    ", columnsToRead: " + Arrays.toString(rightColumnsToRead));
+            
             /*
              * Issue #450:
              * For the left and the right partial partitioned files, the file schema is equal to the columns to read in normal cases.

@@ -500,7 +500,7 @@ log_info "为小表生成分区文件..." >&2
   "tableInfo": {
     "tableName": "small_table",
     "base": true,
-    "columnsToRead": ["join_key", "col1", "col2", "col3"],
+    "columnsToRead": ["join_key", "col1", "col2"],
     "storageInfo": {
       "scheme": "s3",
       "region": "${REGION}",
@@ -696,7 +696,7 @@ test_partitioned_join_worker() {
   "smallTable": {
     "tableName": "small_table",
     "base": false,
-    "columnsToRead": ["join_key", "col1", "col2", "col3"],
+    "columnsToRead": ["join_key", "col1", "col2"],
     "storageInfo": {
       "scheme": "s3",
       "region": "${REGION}",
@@ -711,7 +711,7 @@ test_partitioned_join_worker() {
   "largeTable": {
     "tableName": "large_table",
     "base": false,
-    "columnsToRead": ["id", "join_key", "col1", "col2", "col3", "col4", "col5"],
+    "columnsToRead": ["id", "join_key", "col1", "col2"],
     "storageInfo": {
       "scheme": "s3",
       "region": "${REGION}",
@@ -725,10 +725,10 @@ test_partitioned_join_worker() {
   },
   "joinInfo": {
     "joinType": "EQUI_INNER",
-    "smallColumnAlias": ["join_key", "col1", "col2", "col3"],
-    "largeColumnAlias": ["id", "join_key", "col1", "col2", "col3", "col4", "col5"],
-    "smallProjection": [true, true, true, true],
-    "largeProjection": [true, true, true, true, true, true, true],
+    "smallColumnAlias": ["join_key", "col1", "col2"],
+    "largeColumnAlias": ["id", "join_key", "col1", "col2"],
+    "smallProjection": [true, true, true],
+    "largeProjection": [true, true, true, true],
     "postPartition": false,
     "postPartitionInfo": null,
     "numPartition": ${NUM_PARTITION},
